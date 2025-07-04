@@ -37,9 +37,15 @@ runs:
       with:
         node-version: '20'
     
-    - name: Run Taskmaster Generate
-      run: node ${{ github.action_path }}/dist/index.js
+    - name: Install dependencies
+      run: npm install
       shell: bash
+      working-directory: ${{ github.action_path }}
+    
+    - name: Run Taskmaster Generate
+      run: npx ts-node src/main.ts
+      shell: bash
+      working-directory: ${{ github.action_path }}
       env:
         INPUT_COMPLEXITY-THRESHOLD: ${{ inputs.complexity-threshold }}
         INPUT_MAX-DEPTH: ${{ inputs.max-depth }}
