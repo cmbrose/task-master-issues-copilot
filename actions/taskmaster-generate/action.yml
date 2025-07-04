@@ -19,6 +19,18 @@ inputs:
     description: 'Additional arguments to pass to Taskmaster CLI'
     required: false
     default: ''
+  taskmaster-version:
+    description: 'Version of Taskmaster CLI to use'
+    required: false
+    default: '1.0.0'
+  taskmaster-base-url:
+    description: 'Base URL for Taskmaster CLI downloads'
+    required: false
+    default: 'https://github.com/taskmaster-ai/taskmaster/releases/download'
+  force-download:
+    description: 'Force re-download of Taskmaster CLI binary'
+    required: false
+    default: 'false'
   github-token:
     description: 'GitHub token for API access'
     required: true
@@ -51,6 +63,9 @@ runs:
         INPUT_MAX-DEPTH: ${{ inputs.max-depth }}
         INPUT_PRD-PATH-GLOB: ${{ inputs.prd-path-glob }}
         INPUT_TASKMASTER-ARGS: ${{ inputs.taskmaster-args }}
+        INPUT_TASKMASTER-VERSION: ${{ inputs.taskmaster-version }}
+        INPUT_TASKMASTER-BASE-URL: ${{ inputs.taskmaster-base-url }}
+        INPUT_FORCE-DOWNLOAD: ${{ inputs.force-download }}
         INPUT_GITHUB-TOKEN: ${{ inputs.github-token }}
 
 branding:
