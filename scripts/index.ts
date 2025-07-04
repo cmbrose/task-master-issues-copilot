@@ -29,6 +29,9 @@ export {
   isBinaryAvailable,
   listAvailableVersions,
   cleanupOldVersions,
+  getWrapperPath,
+  isWrapperAvailable,
+  createBinaryWrapper,
   type BinaryDownloadOptions,
   type BinaryInfo,
   type ChecksumOptions
@@ -41,3 +44,14 @@ export {
   getBinaryDownloadUrl,
   type PlatformInfo
 } from './platform-utils';
+
+// Export wrapper script utilities  
+export {
+  createWrapperScript,
+  removeWrapperScript,
+  wrapperExists,
+  addToPath,
+  setupWrapperEnvironment,
+  type WrapperScriptOptions,
+  type WrapperScriptInfo
+} from './wrapper-scripts';

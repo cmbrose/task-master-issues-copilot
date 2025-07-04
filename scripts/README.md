@@ -7,6 +7,7 @@ This directory contains shared utility scripts used by the Taskmaster GitHub Act
 ### Binary Download and Pinning Module
 - `binary-downloader.ts` - Main binary download module with version pinning
 - `platform-utils.ts` - Platform detection utilities for OS/architecture support
+- `wrapper-scripts.ts` - Wrapper script generation for platform-specific execution
 - `index.ts` - Public API exports
 
 ### Available Features
@@ -15,6 +16,9 @@ This directory contains shared utility scripts used by the Taskmaster GitHub Act
 - **Multi-platform support**: Linux, Windows, macOS with x64/arm64 architectures
 - **Binary storage**: Managed storage with cleanup utilities
 - **Platform detection**: Automatic OS and architecture detection
+- **Wrapper scripts**: Generate platform-specific wrapper scripts for easy execution
+- **PATH management**: Add wrapper scripts to PATH for convenient access
+- **Environment variable passing**: Configure environment variables for binary execution
 
 ## Usage
 
@@ -50,6 +54,45 @@ const versions = listAvailableVersions('./bin');
 
 // Clean up old versions, keeping only the 3 most recent
 cleanupOldVersions('./bin', 3);
+```
+
+### Wrapper Scripts
+```typescript
+import { downloadBinary, createWrapperScript, setupWrapperEnvironment } from './scripts';
+
+// Download binary with automatic wrapper creation
+const binaryInfo = await downloadBinary({
+  baseUrl: 'https://github.com/owner/taskmaster/releases/download',
+  version: '1.0.0',
+  storageDir: './bin',
+  createWrapper: true,  // Default is true
+  wrapperOptions: {
+    wrapperName: 'tm',  // Custom wrapper name
+    envVars: {
+      'TM_CONFIG': '/path/to/config'
+    }
+  }
+});
+
+// Wrapper info is included in result
+if (binaryInfo.wrapperInfo) {
+  console.log(`Wrapper created at: ${binaryInfo.wrapperInfo.wrapperPath}`);
+  
+  // Add wrapper directory to PATH
+  setupWrapperEnvironment('./bin');
+  
+  // Now you can run 'tm' from anywhere
+}
+
+// Manually create wrapper for existing binary
+const wrapperInfo = await createWrapperScript({
+  binaryPath: '/path/to/binary',
+  wrapperDir: './bin',
+  wrapperName: 'taskmaster',
+  envVars: {
+    'DEBUG': 'true'
+  }
+});
 ```
 
 ## Building

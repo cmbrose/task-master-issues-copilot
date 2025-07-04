@@ -9,6 +9,7 @@ import * as https from 'https';
 import * as http from 'http';
 import * as crypto from 'crypto';
 import { detectPlatform, getBinaryDownloadUrl, PlatformInfo } from './platform-utils';
+import { createWrapperScript, WrapperScriptInfo, WrapperScriptOptions, getWrapperPath as getWrapperScriptPath, wrapperExists } from './wrapper-scripts';
 
 export interface BinaryDownloadOptions {
   /** Base URL for binary downloads (e.g., 'https://github.com/owner/repo/releases/download') */
@@ -25,6 +26,10 @@ export interface BinaryDownloadOptions {
   forceDownload?: boolean;
   /** Checksum validation options */
   checksum?: ChecksumOptions;
+  /** Create wrapper scripts after download (defaults to true) */
+  createWrapper?: boolean;
+  /** Wrapper script configuration */
+  wrapperOptions?: Partial<WrapperScriptOptions>;
 }
 
 export interface ChecksumOptions {
@@ -47,6 +52,8 @@ export interface BinaryInfo {
   downloaded: boolean;
   /** Checksum verification result */
   checksumVerified?: boolean;
+  /** Wrapper script information (if created) */
+  wrapperInfo?: WrapperScriptInfo;
 }
 
 /**
@@ -242,6 +249,38 @@ function binaryExists(binaryPath: string): boolean {
 }
 
 /**
+ * Create wrapper script for a binary if requested
+ */
+async function createWrapperIfRequested(
+  binaryPath: string,
+  options: BinaryDownloadOptions,
+  platform: PlatformInfo
+): Promise<WrapperScriptInfo | undefined> {
+  if (options.createWrapper === false) {
+    return undefined;
+  }
+
+  const wrapperDir = path.join(options.storageDir, 'bin');
+  const wrapperName = options.wrapperOptions?.wrapperName || options.binaryName || 'taskmaster';
+
+  const wrapperOptions: WrapperScriptOptions = {
+    binaryPath,
+    wrapperDir,
+    wrapperName,
+    platform,
+    ...options.wrapperOptions
+  };
+
+  try {
+    return await createWrapperScript(wrapperOptions);
+  } catch (error) {
+    // Don't fail the entire operation if wrapper creation fails
+    // Just log and continue without wrapper
+    return undefined;
+  }
+}
+
+/**
  * Download and pin a specific version of a binary
  */
 export async function downloadBinary(options: BinaryDownloadOptions): Promise<BinaryInfo> {
@@ -274,12 +313,16 @@ export async function downloadBinary(options: BinaryDownloadOptions): Promise<Bi
 
     // Return if we successfully verified the existing binary or no checksum was requested
     if (checksumVerified === true || checksumVerified === undefined) {
+      // Create wrapper script if requested
+      const wrapperInfo = await createWrapperIfRequested(binaryPath, options, platform);
+      
       return {
         binaryPath,
         version: options.version,
         platform,
         downloaded: false,
-        checksumVerified
+        checksumVerified,
+        wrapperInfo
       };
     }
   }
@@ -316,12 +359,16 @@ export async function downloadBinary(options: BinaryDownloadOptions): Promise<Bi
     }
   }
 
+  // Create wrapper script if requested
+  const wrapperInfo = await createWrapperIfRequested(binaryPath, options, platform);
+
   return {
     binaryPath,
     version: options.version,
     platform,
     downloaded: true,
-    checksumVerified
+    checksumVerified,
+    wrapperInfo
   };
 }
 
@@ -407,4 +454,51 @@ export function cleanupOldVersions(
       // Ignore cleanup errors, but could log them if needed
     }
   }
+}
+
+/**
+ * Get wrapper script path for a binary version
+ */
+export function getWrapperPath(
+  storageDir: string,
+  wrapperName: string = 'taskmaster',
+  platform?: PlatformInfo
+): string {
+  const wrapperDir = path.join(storageDir, 'bin');
+  return getWrapperScriptPath(wrapperDir, wrapperName, platform);
+}
+
+/**
+ * Check if wrapper script exists for a binary
+ */
+export function isWrapperAvailable(
+  storageDir: string,
+  wrapperName: string = 'taskmaster',
+  platform?: PlatformInfo
+): boolean {
+  const wrapperDir = path.join(storageDir, 'bin');
+  return wrapperExists(wrapperDir, wrapperName, platform);
+}
+
+/**
+ * Create wrapper script for an existing binary
+ */
+export async function createBinaryWrapper(
+  binaryPath: string,
+  storageDir: string,
+  wrapperName: string = 'taskmaster',
+  options?: Partial<WrapperScriptOptions>
+): Promise<WrapperScriptInfo> {
+  const wrapperDir = path.join(storageDir, 'bin');
+  const platform = options?.platform || detectPlatform();
+
+  const wrapperOptions: WrapperScriptOptions = {
+    binaryPath,
+    wrapperDir,
+    wrapperName,
+    platform,
+    ...options
+  };
+
+  return await createWrapperScript(wrapperOptions);
 }
