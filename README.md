@@ -78,6 +78,43 @@ This repository provides GitHub Actions that automatically generate hierarchical
 
 3. **Push to trigger** automatic issue generation from your PRD
 
+## PRD File Format
+
+The actions expect PRD (Product Requirements Document) files in Markdown format. Here's a simple example:
+
+```markdown
+# Example Product Requirements Document
+
+## Overview
+Build a simple notification system for our application.
+
+## Core Features
+1. **Email Notifications**: Send emails to users about important events
+2. **Push Notifications**: Send mobile push notifications  
+
+## Technical Architecture
+- REST API for notification management
+- Email service integration (SendGrid)
+- Push notification service (Firebase)
+
+## Development Roadmap
+
+### Phase 1: Foundation
+- Set up notification service infrastructure
+- Implement basic email notification functionality
+
+### Phase 2: Mobile Integration  
+- Add push notification capability
+- Integrate with mobile apps
+
+## Logical Dependency Chain
+1. Infrastructure setup must be completed first
+2. Email notifications build on the infrastructure
+3. Push notifications require the preference system
+```
+
+The Taskmaster CLI will parse this structure and create a hierarchical task breakdown based on the phases, features, and dependencies described.
+
 ## Usage Examples
 
 ### 🚀 Generate Issues from PRD Files
