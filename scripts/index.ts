@@ -74,3 +74,29 @@ export {
   type ValidationResult,
   type ValidationRule
 } from './config-management';
+
+// Export output format validation utilities
+export {
+  detectOutputFormat,
+  parseJsonOutput,
+  parseXmlOutput,
+  parseTextOutput,
+  sanitizeOutput,
+  validateOutput,
+  convertFormat,
+  type OutputFormat,
+  type OutputValidationResult,
+  type OutputValidationOptions,
+  type FormatConversionOptions,
+  type ConversionResult
+} from './output-validation';
+
+// Export output processing integration utilities
+export {
+  processCliOutput,
+  validateCliOutput,
+  getOutputConfigFromEnvironment,
+  createOutputProcessor,
+  type OutputProcessingOptions,
+  type OutputProcessingResult
+} from './output-processing';
