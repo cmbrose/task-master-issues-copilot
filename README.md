@@ -52,7 +52,7 @@ This repository provides GitHub Actions that automatically generate hierarchical
 
 ## Quick Start
 
-1. **Add actions to your workflow file** (`.github/workflows/`):
+1. **Add the composite action to your workflow file** (`.github/workflows/`):
    ```yaml
    name: Taskmaster Workflow
    on:
@@ -63,20 +63,47 @@ This repository provides GitHub Actions that automatically generate hierarchical
      issues:
        types: [closed]
 
+   permissions:
+     issues: write
+     contents: read
+
    jobs:
-     generate-tasks:
-       if: github.event_name == 'push'
+     taskmaster:
        runs-on: ubuntu-latest
        steps:
          - uses: actions/checkout@v4
-         - uses: your-org/task-master-issues/actions/taskmaster-generate@v1
+         - uses: cmbrose/task-master-issues@v1
            with:
+             complexity-threshold: '40'
+             max-depth: '3'
+             prd-path-glob: 'docs/**.prd.md'
+             breakdown-max-depth: '2'
              github-token: ${{ secrets.GITHUB_TOKEN }}
    ```
 
 2. **Create a PRD file** in `docs/` directory ending with `.prd.md`
 
 3. **Push to trigger** automatic issue generation from your PRD
+
+### Alternative: Use Individual Actions
+
+You can also use the individual actions separately:
+```yaml
+# Use only the generate action
+- uses: cmbrose/task-master-issues/actions/taskmaster-generate@v1
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+
+# Use only the breakdown action
+- uses: cmbrose/task-master-issues/actions/taskmaster-breakdown@v1
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+
+# Use only the watcher action
+- uses: cmbrose/task-master-issues/actions/taskmaster-watcher@v1
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+```
 
 ## PRD File Format
 
@@ -261,7 +288,7 @@ The `github-token` requires the following permissions:
 
 ## Complete Workflow Example
 
-Here's a comprehensive workflow that uses all three actions:
+### Using the Composite Action (Recommended)
 
 ```yaml
 name: Taskmaster Complete Workflow
@@ -276,6 +303,58 @@ on:
   schedule:
     - cron: '*/10 * * * *'
 
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  taskmaster:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Run Taskmaster
+        id: taskmaster
+        uses: cmbrose/task-master-issues@v1
+        with:
+          complexity-threshold: '40'
+          max-depth: '3'
+          prd-path-glob: 'docs/**.prd.md'
+          breakdown-max-depth: '2'
+          action-mode: 'full'
+          scan-mode: ${{ github.event_name == 'schedule' && 'full' || 'webhook' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Upload Task Graph
+        if: steps.taskmaster.outputs.task-graph
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-graph
+          path: ${{ steps.taskmaster.outputs.task-graph }}
+```
+
+### Using Individual Actions
+
+For more granular control, you can use individual actions:
+
+```yaml
+name: Taskmaster Individual Actions
+
+on:
+  push:
+    paths: ['docs/**.prd.md']
+  issue_comment:
+    types: [created]
+  issues:
+    types: [closed]
+  schedule:
+    - cron: '*/10 * * * *'
+
+permissions:
+  issues: write
+  contents: read
+
 jobs:
   generate-from-prd:
     if: github.event_name == 'push'
@@ -286,7 +365,7 @@ jobs:
         
       - name: Generate Issues
         id: generate
-        uses: ./actions/taskmaster-generate
+        uses: cmbrose/task-master-issues/actions/taskmaster-generate@v1
         with:
           complexity-threshold: '40'
           max-depth: '3'
@@ -306,7 +385,7 @@ jobs:
         uses: actions/checkout@v4
         
       - name: Break Down Issue
-        uses: ./actions/taskmaster-breakdown
+        uses: cmbrose/task-master-issues/actions/taskmaster-breakdown@v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -318,7 +397,7 @@ jobs:
         uses: actions/checkout@v4
         
       - name: Update Dependencies
-        uses: ./actions/taskmaster-watcher
+        uses: cmbrose/task-master-issues/actions/taskmaster-watcher@v1
         with:
           scan-mode: ${{ github.event_name == 'schedule' && 'full' || 'webhook' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,65 @@
+name: Test Root Composite Action
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'action.yml'
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  test-composite-action:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Test Composite Action
+        id: composite
+        uses: ./
+        with:
+          complexity-threshold: '50'
+          max-depth: '2'
+          prd-path-glob: 'docs/**.prd.md'
+          breakdown-max-depth: '3'
+          action-mode: 'generate'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Verify outputs exist
+        run: |
+          echo "Task graph: ${{ steps.composite.outputs.task-graph }}"
+          echo "Issues created: ${{ steps.composite.outputs.issues-created }}"
+          echo "Sub-issues created: ${{ steps.composite.outputs.sub-issues-created }}"
+          echo "Parent issue updated: ${{ steps.composite.outputs.parent-issue-updated }}"
+          echo "Issues updated: ${{ steps.composite.outputs.issues-updated }}"
+          echo "Dependencies resolved: ${{ steps.composite.outputs.dependencies-resolved }}"
+
+  test-action-mode-breakdown:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Test Breakdown Mode
+        id: breakdown
+        uses: ./
+        with:
+          action-mode: 'breakdown'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  test-action-mode-watcher:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Test Watcher Mode
+        id: watcher
+        uses: ./
+        with:
+          action-mode: 'watcher'
+          scan-mode: 'full'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
