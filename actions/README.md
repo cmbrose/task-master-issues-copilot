@@ -59,3 +59,33 @@ Each action can be used independently in GitHub workflows. See the individual ac
 ## Development
 
 All actions are built using TypeScript and compiled to JavaScript for execution. The source code is in the `src/` directories and compiled output goes to `dist/` directories.
+
+### Building Actions
+
+To build all actions:
+```bash
+npm run build:actions
+```
+
+To build individual actions:
+```bash
+npm run build:generate    # Build taskmaster-generate
+npm run build:breakdown   # Build taskmaster-breakdown  
+npm run build:watcher     # Build taskmaster-watcher
+```
+
+### Development Workflow
+
+1. Make changes to TypeScript files in `actions/*/src/`
+2. Run `npm run build:actions` to compile changes
+3. Commit both source and compiled `dist/` files
+4. The CI workflow will verify builds are up to date
+
+### Dependencies
+
+The actions use the following key dependencies:
+- `@actions/core` - GitHub Actions toolkit core
+- `@actions/github` - GitHub API integration
+- `@vercel/ncc` - Bundler for creating single-file distributions
+
+All dependencies are bundled into the `dist/index.js` files for distribution.

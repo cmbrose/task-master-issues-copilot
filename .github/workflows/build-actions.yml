@@ -1,0 +1,45 @@
+name: Build Actions
+
+on:
+  push:
+    paths:
+      - 'actions/**/*.ts'
+      - 'package*.json'
+      - 'tsconfig.json'
+      - '.github/workflows/build-actions.yml'
+  pull_request:
+    paths:
+      - 'actions/**/*.ts'
+      - 'package*.json'
+      - 'tsconfig.json'
+      - '.github/workflows/build-actions.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Lint TypeScript
+        run: npm run lint
+        
+      - name: Build actions
+        run: npm run build:actions
+        
+      - name: Check for uncommitted changes
+        run: |
+          if ! git diff --exit-code actions/*/dist/; then
+            echo "::error::Uncommitted changes found in dist/ directories. Please run 'npm run build:actions' and commit the changes."
+            exit 1
+          fi
