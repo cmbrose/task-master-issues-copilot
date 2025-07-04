@@ -38,6 +38,8 @@ inputs:
 outputs:
   task-graph:
     description: 'Path to generated task graph JSON file'
+  task-graph-generated:
+    description: 'Whether task-graph.json was successfully generated (true/false)'
   issues-created:
     description: 'Number of issues created or updated'
 

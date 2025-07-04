@@ -7,8 +7,84 @@
 
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import { setupTaskmasterCli, getTaskmasterConfigFromInputs } from './taskmaster-cli';
+import * as fs from 'fs';
+import * as path from 'path';
+import { setupTaskmasterCli, getTaskmasterConfigFromInputs, runTaskmasterCli, validateTaskGraph } from './taskmaster-cli';
 import { loadConfig, TaskmasterConfig } from '@scripts/index';
+
+/**
+ * Find PRD files matching the given glob pattern
+ * Simple implementation using Node.js built-in functions
+ */
+function findPrdFiles(pattern: string): string[] {
+  // For simplicity, support basic patterns like "docs/*.prd.md" or "*.prd.md"
+  const basePath = process.cwd();
+  const files: string[] = [];
+  
+  // Handle simple glob patterns
+  if (pattern.includes('*')) {
+    const parts = pattern.split('/');
+    let currentPath = basePath;
+    
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      
+      if (part === '.' || part === '') {
+        continue;
+      }
+      
+      if (part.includes('*')) {
+        // This is a wildcard part, scan the directory
+        if (fs.existsSync(currentPath) && fs.statSync(currentPath).isDirectory()) {
+          const entries = fs.readdirSync(currentPath);
+          
+          for (const entry of entries) {
+            const entryPath = path.join(currentPath, entry);
+            
+            if (i === parts.length - 1) {
+              // Last part, check if it matches the pattern and is a file
+              if (fs.statSync(entryPath).isFile() && matchesPattern(entry, part)) {
+                files.push(entryPath);
+              }
+            } else {
+              // Not the last part, continue recursively if it's a directory
+              if (fs.statSync(entryPath).isDirectory() && matchesPattern(entry, part)) {
+                const remainingPattern = parts.slice(i + 1).join('/');
+                const subFiles = findPrdFiles(path.join(entryPath, remainingPattern));
+                files.push(...subFiles);
+              }
+            }
+          }
+        }
+        break; // Stop processing after wildcard
+      } else {
+        // Regular directory name
+        currentPath = path.join(currentPath, part);
+      }
+    }
+  } else {
+    // No wildcards, just check if the file exists
+    const fullPath = path.resolve(basePath, pattern);
+    if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+      files.push(fullPath);
+    }
+  }
+  
+  return files;
+}
+
+/**
+ * Simple pattern matching for basic wildcards
+ */
+function matchesPattern(filename: string, pattern: string): boolean {
+  // Convert simple glob patterns to regex
+  const regexPattern = pattern
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
+    
+  const regex = new RegExp(`^${regexPattern}$`, 'i');
+  return regex.test(filename);
+}
 
 async function run(): Promise<void> {
   try {
@@ -53,16 +129,71 @@ async function run(): Promise<void> {
     
     core.info(`✅ Using Taskmaster CLI ${binaryInfo.version} at ${binaryInfo.binaryPath}`);
 
-    // TODO: Implement remaining action logic
-    // 1. Run Taskmaster CLI to generate task graph
-    //    - Use binaryInfo.binaryPath to execute the binary
-    //    - Pass config parameters to the CLI
-    // 2. Parse the generated task-graph.json
+    // Find PRD files to process
+    const prdFiles = findPrdFiles(config.prdPathGlob);
+    
+    if (prdFiles.length === 0) {
+      core.warning(`No PRD files found matching pattern: ${config.prdPathGlob}`);
+      core.setOutput('task-graph', '');
+      core.setOutput('issues-created', '0');
+      return;
+    }
+
+    core.info(`📁 Found ${prdFiles.length} PRD file(s) to process`);
+    prdFiles.forEach(file => core.info(`   • ${file}`));
+
+    // For now, process the first PRD file found
+    // TODO: In the future, we might want to support multiple PRD files
+    const prdFile = prdFiles[0];
+    core.info(`🔄 Processing PRD file: ${prdFile}`);
+
+    // Run Taskmaster CLI to generate task graph
+    const taskGraphPath = path.join(process.cwd(), 'task-graph.json');
+    
+    try {
+      const runResult = await runTaskmasterCli(binaryInfo, {
+        prdPath: prdFile,
+        complexityThreshold: config.complexityThreshold,
+        maxDepth: config.maxDepth,
+        outputPath: taskGraphPath,
+        additionalArgs: config.taskmasterArgs ? config.taskmasterArgs.split(' ').filter(arg => arg.trim()) : []
+      });
+
+      core.info(`✅ CLI execution completed with exit code: ${runResult.exitCode}`);
+      
+      // Validate the generated task graph
+      if (runResult.taskGraphGenerated) {
+        const isValid = validateTaskGraph(runResult.taskGraphPath);
+        if (!isValid) {
+          throw new Error('Generated task graph failed validation');
+        }
+        
+        // Set outputs for other steps to use
+        core.setOutput('task-graph', runResult.taskGraphPath);
+        core.setOutput('task-graph-generated', 'true');
+        
+        // Read and log task graph summary
+        const taskGraphContent = fs.readFileSync(runResult.taskGraphPath, 'utf8');
+        const taskGraph = JSON.parse(taskGraphContent);
+        const taskCount = taskGraph.tasks ? taskGraph.tasks.length : 0;
+        core.info(`📊 Generated task graph with ${taskCount} tasks`);
+        
+      } else {
+        throw new Error('Task graph was not generated by CLI');
+      }
+
+    } catch (error) {
+      const errorMessage = `Failed to generate task graph: ${error instanceof Error ? error.message : String(error)}`;
+      core.setFailed(errorMessage);
+      throw error;
+    }
+
+    // TODO: Future enhancements
+    // 2. Parse the generated task-graph.json for GitHub issue creation
     // 3. Create/update GitHub issues with hierarchy
     // 4. Upload artifact
     
-    // For now, set placeholder outputs
-    core.setOutput('task-graph', 'task-graph.json');
+    // Set placeholder outputs for now
     core.setOutput('issues-created', '0');
     
     core.info('✅ Taskmaster Generate completed successfully');
