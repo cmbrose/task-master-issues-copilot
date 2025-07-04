@@ -13,6 +13,7 @@ import { Octokit } from '@octokit/rest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
+import * as yaml from 'js-yaml';
 
 import { components } from "@octokit/openapi-types";
 
@@ -75,9 +76,79 @@ try {
   complexityMap = {};
 }
 
-// Helper to create issue body
-function buildIssueBody(task: Task, parentIssue?: Issue): string {
-  let body = '';
+// Helper to parse YAML front-matter from issue body
+function parseYamlFrontMatter(body: string): { frontMatter: any; content: string } {
+  const frontMatterRegex = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
+  const match = body.match(frontMatterRegex);
+  
+  if (match) {
+    try {
+      const frontMatter = yaml.load(match[1]) as any;
+      return { frontMatter, content: match[2] };
+    } catch (e) {
+      console.warn('Failed to parse YAML front-matter:', e);
+      return { frontMatter: {}, content: body };
+    }
+  }
+  
+  return { frontMatter: {}, content: body };
+}
+
+// Helper to create YAML front-matter for issue body
+function createYamlFrontMatter(task: Task, parentTask?: Task): any {
+  const frontMatter: any = {};
+  
+  // Add task ID
+  if (parentTask) {
+    frontMatter.id = `${parentTask.id}.${task.id}`;
+    frontMatter.parent = parentTask.id;
+  } else {
+    frontMatter.id = task.id;
+  }
+  
+  // Add dependencies
+  if (task.dependencies?.length) {
+    frontMatter.dependencies = task.dependencies;
+  }
+  
+  // Add required by relationships
+  if (task.requiredBy?.length) {
+    frontMatter.dependents = task.requiredBy.map(t => t.id);
+  }
+  
+  // Add status and priority
+  if (task.status) {
+    frontMatter.status = task.status;
+  }
+  if (task.priority) {
+    frontMatter.priority = task.priority;
+  }
+  
+  return frontMatter;
+}
+
+// Helper to determine if an issue should be blocked
+function isIssueBlocked(task: Task, idToIssue: Record<string, Issue>, parentTask?: Task): boolean {
+  if (!task.dependencies?.length) return false;
+  
+  return task.dependencies.some(depId => {
+    const depKey = parentTask ? `${parentTask.id}.${depId}` : `${depId}`;
+    const depIssue = idToIssue[depKey];
+    return depIssue && depIssue.state !== 'closed';
+  });
+}
+
+// Helper to create issue body with YAML front-matter
+function buildIssueBody(task: Task, parentIssue?: Issue, parentTask?: Task): string {
+  const frontMatter = createYamlFrontMatter(task, parentTask);
+  let yamlString = '';
+  
+  if (Object.keys(frontMatter).length > 0) {
+    yamlString = '---\n' + yaml.dump(frontMatter) + '---\n\n';
+  }
+  
+  let body = yamlString;
+  
   // Add complexity if available
   let idKey: string;
   if (typeof (task as any).id !== 'undefined' && parentIssue && (parentIssue as any).id !== undefined) {
@@ -164,7 +235,7 @@ async function createOrGetIssue(task: Task, parentTask?: Task, parentIssue?: Iss
     title = task.title;
   }
 
-  const body = buildIssueBody(task, parentIssue);
+  const body = buildIssueBody(task, parentIssue, parentTask);
 
   let existingIssue = await findExistingIssue(title);
   if (existingIssue) {
@@ -175,12 +246,18 @@ async function createOrGetIssue(task: Task, parentTask?: Task, parentIssue?: Iss
     };
   }
 
+  // Determine initial labels
+  const labels = ['taskmaster'];
+  
+  // Add blocked label if task has unresolved dependencies
+  // Note: We'll determine this after all issues are created, for now just add taskmaster label
+
   const res = await octokit.issues.create({
     owner: GITHUB_OWNER!,
     repo: GITHUB_REPO!,
     title,
     body,
-    labels: ['taskmaster'],
+    labels,
   });
 
   allIssuesCache.push(res.data);
@@ -192,22 +269,59 @@ async function createOrGetIssue(task: Task, parentTask?: Task, parentIssue?: Iss
   };
 }
 
-// Helper to add sub-issue (GitHub Projects/Tasks API)
+// Helper to add sub-issue (GitHub Projects/Tasks API) with error handling
 async function addSubIssue(parentIssue: ParentIssue, subIssue: Issue) {
   if (parentIssue.subIssues.some(s => s.id === subIssue.id)) {
     console.log(`Sub-issue #${subIssue.number} is already a sub-issue of parent #${parentIssue.number}.`);
     return;
   }
 
-  await octokit.issues.addSubIssue({
-    owner: GITHUB_OWNER!,
-    repo: GITHUB_REPO!,
-    issue_number: parentIssue.number,
-    sub_issue_id: subIssue.id,
-  });
-  parentIssue.subIssues.push(subIssue);
+  try {
+    await octokit.issues.addSubIssue({
+      owner: GITHUB_OWNER!,
+      repo: GITHUB_REPO!,
+      issue_number: parentIssue.number,
+      sub_issue_id: subIssue.id,
+    });
+    parentIssue.subIssues.push(subIssue);
+    console.log(`Added sub-issue #${subIssue.number} to parent #${parentIssue.number}.`);
+  } catch (error) {
+    console.warn(`Failed to add sub-issue #${subIssue.number} to parent #${parentIssue.number}:`, error);
+    // Continue execution even if Sub-issues API fails
+    // We'll track the relationship through YAML front-matter instead
+  }
+}
+
+// Helper to manage blocked label on an issue
+async function updateBlockedLabel(issue: Issue, shouldBeBlocked: boolean) {
+  const currentLabels = issue.labels?.map(l => typeof l === 'string' ? l : l.name) || [];
+  const hasBlockedLabel = currentLabels.includes('blocked');
   
-  console.log(`Added sub-issue #${subIssue.number} to parent #${parentIssue.number}.`);
+  if (shouldBeBlocked && !hasBlockedLabel) {
+    try {
+      await octokit.issues.addLabels({
+        owner: GITHUB_OWNER!,
+        repo: GITHUB_REPO!,
+        issue_number: issue.number,
+        labels: ['blocked'],
+      });
+      console.log(`Added 'blocked' label to issue #${issue.number}`);
+    } catch (error) {
+      console.warn(`Failed to add 'blocked' label to issue #${issue.number}:`, error);
+    }
+  } else if (!shouldBeBlocked && hasBlockedLabel) {
+    try {
+      await octokit.issues.removeLabel({
+        owner: GITHUB_OWNER!,
+        repo: GITHUB_REPO!,
+        issue_number: issue.number,
+        name: 'blocked',
+      });
+      console.log(`Removed 'blocked' label from issue #${issue.number}`);
+    } catch (error) {
+      console.warn(`Failed to remove 'blocked' label from issue #${issue.number}:`, error);
+    }
+  }
 }
 
 // Helper to update issue with dependency links
@@ -229,12 +343,18 @@ function updateBodyWithRequiredBy(body: string, requiredByIssues: Issue[] | unde
 }
 
 async function getSubIssues(issue: Issue): Promise<ApiIssue[]> {
-  const subIssues = await octokit.issues.listSubIssues({
-    owner: GITHUB_OWNER!,
-    repo: GITHUB_REPO!,
-    issue_number: issue.number,
-  });
-  return subIssues.data;
+  try {
+    const subIssues = await octokit.issues.listSubIssues({
+      owner: GITHUB_OWNER!,
+      repo: GITHUB_REPO!,
+      issue_number: issue.number,
+    });
+    return subIssues.data;
+  } catch (error) {
+    console.warn(`Failed to get sub-issues for issue #${issue.number}:`, error);
+    // Return empty array if Sub-issues API is unavailable
+    return [];
+  }
 }
 
 async function main() {
@@ -273,7 +393,7 @@ async function main() {
     }
   }
 
-  // Update issues with dependency links
+  // Update issues with dependency links and blocked status
   // For parent tasks
   for (const task of tasks) {
     const issue = idToIssue[`${task.id}`];
@@ -283,6 +403,10 @@ async function main() {
 
     const reqByIssues = task.requiredBy?.map(reqBy => idToIssue[`${reqBy.id}`]).filter(Boolean);
     issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
+
+    // Check if issue should be blocked
+    const shouldBeBlocked = isIssueBlocked(task, idToIssue);
+    await updateBlockedLabel(issue, shouldBeBlocked);
 
     if (issue.expectedBody !== issue.body) {
       await octokit.issues.update({
@@ -304,6 +428,10 @@ async function main() {
 
         const reqByIssues = sub.requiredBy?.map(reqBy => idToIssue[`${task.id}.${reqBy.id}`]).filter(Boolean);
         issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
+
+        // Check if subtask should be blocked
+        const shouldBeBlocked = isIssueBlocked(sub, idToIssue, task);
+        await updateBlockedLabel(issue, shouldBeBlocked);
 
         if (issue.expectedBody !== issue.body) {
           await octokit.issues.update({

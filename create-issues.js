@@ -61,6 +61,7 @@ var rest_1 = require("@octokit/rest");
 var fs = require("fs");
 var path = require("path");
 var dotenv = require("dotenv");
+var yaml = require("js-yaml");
 // Types for Node.js globals (process, etc.)
 // If you see type errors, run: npm install --save-dev @types/node
 dotenv.config();
@@ -89,10 +90,71 @@ catch (e) {
     // If not found or invalid, skip
     complexityMap = {};
 }
-// Helper to create issue body
-function buildIssueBody(task, parentIssue) {
+// Helper to parse YAML front-matter from issue body
+function parseYamlFrontMatter(body) {
+    var frontMatterRegex = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
+    var match = body.match(frontMatterRegex);
+    if (match) {
+        try {
+            var frontMatter = yaml.load(match[1]);
+            return { frontMatter: frontMatter, content: match[2] };
+        }
+        catch (e) {
+            console.warn('Failed to parse YAML front-matter:', e);
+            return { frontMatter: {}, content: body };
+        }
+    }
+    return { frontMatter: {}, content: body };
+}
+// Helper to create YAML front-matter for issue body
+function createYamlFrontMatter(task, parentTask) {
     var _a, _b;
-    var body = '';
+    var frontMatter = {};
+    // Add task ID
+    if (parentTask) {
+        frontMatter.id = "".concat(parentTask.id, ".").concat(task.id);
+        frontMatter.parent = parentTask.id;
+    }
+    else {
+        frontMatter.id = task.id;
+    }
+    // Add dependencies
+    if ((_a = task.dependencies) === null || _a === void 0 ? void 0 : _a.length) {
+        frontMatter.dependencies = task.dependencies;
+    }
+    // Add required by relationships
+    if ((_b = task.requiredBy) === null || _b === void 0 ? void 0 : _b.length) {
+        frontMatter.dependents = task.requiredBy.map(function (t) { return t.id; });
+    }
+    // Add status and priority
+    if (task.status) {
+        frontMatter.status = task.status;
+    }
+    if (task.priority) {
+        frontMatter.priority = task.priority;
+    }
+    return frontMatter;
+}
+// Helper to determine if an issue should be blocked
+function isIssueBlocked(task, idToIssue, parentTask) {
+    var _a;
+    if (!((_a = task.dependencies) === null || _a === void 0 ? void 0 : _a.length))
+        return false;
+    return task.dependencies.some(function (depId) {
+        var depKey = parentTask ? "".concat(parentTask.id, ".").concat(depId) : "".concat(depId);
+        var depIssue = idToIssue[depKey];
+        return depIssue && depIssue.state !== 'closed';
+    });
+}
+// Helper to create issue body with YAML front-matter
+function buildIssueBody(task, parentIssue, parentTask) {
+    var _a, _b;
+    var frontMatter = createYamlFrontMatter(task, parentTask);
+    var yamlString = '';
+    if (Object.keys(frontMatter).length > 0) {
+        yamlString = '---\n' + yaml.dump(frontMatter) + '---\n\n';
+    }
+    var body = yamlString;
     // Add complexity if available
     var idKey;
     if (typeof task.id !== 'undefined' && parentIssue && parentIssue.id !== undefined) {
@@ -174,7 +236,7 @@ function findExistingIssue(title) {
 // Helper to create or get issue
 function createOrGetIssue(task, parentTask, parentIssue) {
     return __awaiter(this, void 0, void 0, function () {
-        var title, body, existingIssue, res;
+        var title, body, existingIssue, labels, res;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
@@ -184,7 +246,7 @@ function createOrGetIssue(task, parentTask, parentIssue) {
                     else {
                         title = task.title;
                     }
-                    body = buildIssueBody(task, parentIssue);
+                    body = buildIssueBody(task, parentIssue, parentTask);
                     return [4 /*yield*/, findExistingIssue(title)];
                 case 1:
                     existingIssue = _a.sent();
@@ -192,12 +254,13 @@ function createOrGetIssue(task, parentTask, parentIssue) {
                         console.log("Issue already exists for: ".concat(title, " (#").concat(existingIssue.number, ")"));
                         return [2 /*return*/, __assign(__assign({}, existingIssue), { expectedBody: body })];
                     }
+                    labels = ['taskmaster'];
                     return [4 /*yield*/, octokit.issues.create({
                             owner: GITHUB_OWNER,
                             repo: GITHUB_REPO,
                             title: title,
                             body: body,
-                            labels: ['taskmaster'],
+                            labels: labels,
                         })];
                 case 2:
                     res = _a.sent();
@@ -208,9 +271,10 @@ function createOrGetIssue(task, parentTask, parentIssue) {
         });
     });
 }
-// Helper to add sub-issue (GitHub Projects/Tasks API)
+// Helper to add sub-issue (GitHub Projects/Tasks API) with error handling
 function addSubIssue(parentIssue, subIssue) {
     return __awaiter(this, void 0, void 0, function () {
+        var error_1;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
@@ -218,17 +282,78 @@ function addSubIssue(parentIssue, subIssue) {
                         console.log("Sub-issue #".concat(subIssue.number, " is already a sub-issue of parent #").concat(parentIssue.number, "."));
                         return [2 /*return*/];
                     }
+                    _a.label = 1;
+                case 1:
+                    _a.trys.push([1, 3, , 4]);
                     return [4 /*yield*/, octokit.issues.addSubIssue({
                             owner: GITHUB_OWNER,
                             repo: GITHUB_REPO,
                             issue_number: parentIssue.number,
                             sub_issue_id: subIssue.id,
                         })];
-                case 1:
+                case 2:
                     _a.sent();
                     parentIssue.subIssues.push(subIssue);
                     console.log("Added sub-issue #".concat(subIssue.number, " to parent #").concat(parentIssue.number, "."));
-                    return [2 /*return*/];
+                    return [3 /*break*/, 4];
+                case 3:
+                    error_1 = _a.sent();
+                    console.warn("Failed to add sub-issue #".concat(subIssue.number, " to parent #").concat(parentIssue.number, ":"), error_1);
+                    return [3 /*break*/, 4];
+                case 4: return [2 /*return*/];
+            }
+        });
+    });
+}
+// Helper to manage blocked label on an issue
+function updateBlockedLabel(issue, shouldBeBlocked) {
+    return __awaiter(this, void 0, void 0, function () {
+        var currentLabels, hasBlockedLabel, error_2, error_3;
+        var _a;
+        return __generator(this, function (_b) {
+            switch (_b.label) {
+                case 0:
+                    currentLabels = ((_a = issue.labels) === null || _a === void 0 ? void 0 : _a.map(function (l) { return typeof l === 'string' ? l : l.name; })) || [];
+                    hasBlockedLabel = currentLabels.includes('blocked');
+                    if (!(shouldBeBlocked && !hasBlockedLabel)) return [3 /*break*/, 5];
+                    _b.label = 1;
+                case 1:
+                    _b.trys.push([1, 3, , 4]);
+                    return [4 /*yield*/, octokit.issues.addLabels({
+                            owner: GITHUB_OWNER,
+                            repo: GITHUB_REPO,
+                            issue_number: issue.number,
+                            labels: ['blocked'],
+                        })];
+                case 2:
+                    _b.sent();
+                    console.log("Added 'blocked' label to issue #".concat(issue.number));
+                    return [3 /*break*/, 4];
+                case 3:
+                    error_2 = _b.sent();
+                    console.warn("Failed to add 'blocked' label to issue #".concat(issue.number, ":"), error_2);
+                    return [3 /*break*/, 4];
+                case 4: return [3 /*break*/, 9];
+                case 5:
+                    if (!(!shouldBeBlocked && hasBlockedLabel)) return [3 /*break*/, 9];
+                    _b.label = 6;
+                case 6:
+                    _b.trys.push([6, 8, , 9]);
+                    return [4 /*yield*/, octokit.issues.removeLabel({
+                            owner: GITHUB_OWNER,
+                            repo: GITHUB_REPO,
+                            issue_number: issue.number,
+                            name: 'blocked',
+                        })];
+                case 7:
+                    _b.sent();
+                    console.log("Removed 'blocked' label from issue #".concat(issue.number));
+                    return [3 /*break*/, 9];
+                case 8:
+                    error_3 = _b.sent();
+                    console.warn("Failed to remove 'blocked' label from issue #".concat(issue.number, ":"), error_3);
+                    return [3 /*break*/, 9];
+                case 9: return [2 /*return*/];
             }
         });
     });
@@ -249,17 +374,25 @@ function updateBodyWithRequiredBy(body, requiredByIssues) {
 }
 function getSubIssues(issue) {
     return __awaiter(this, void 0, void 0, function () {
-        var subIssues;
+        var subIssues, error_4;
         return __generator(this, function (_a) {
             switch (_a.label) {
-                case 0: return [4 /*yield*/, octokit.issues.listSubIssues({
-                        owner: GITHUB_OWNER,
-                        repo: GITHUB_REPO,
-                        issue_number: issue.number,
-                    })];
+                case 0:
+                    _a.trys.push([0, 2, , 3]);
+                    return [4 /*yield*/, octokit.issues.listSubIssues({
+                            owner: GITHUB_OWNER,
+                            repo: GITHUB_REPO,
+                            issue_number: issue.number,
+                        })];
                 case 1:
                     subIssues = _a.sent();
                     return [2 /*return*/, subIssues.data];
+                case 2:
+                    error_4 = _a.sent();
+                    console.warn("Failed to get sub-issues for issue #".concat(issue.number, ":"), error_4);
+                    // Return empty array if Sub-issues API is unavailable
+                    return [2 /*return*/, []];
+                case 3: return [2 /*return*/];
             }
         });
     });
@@ -342,7 +475,7 @@ function main() {
                     return [3 /*break*/, 1];
                 case 4:
                     _loop_2 = function (task) {
-                        var issue, depIssues, reqByIssues, _p, _q, sub, issue_1, depIssues_1, reqByIssues_1;
+                        var issue, depIssues, reqByIssues, shouldBeBlocked, _p, _q, sub, issue_1, depIssues_1, reqByIssues_1, shouldBeBlocked_1;
                         return __generator(this, function (_r) {
                             switch (_r.label) {
                                 case 0:
@@ -351,44 +484,52 @@ function main() {
                                     issue.expectedBody = updateIssueWithDependencies(issue.expectedBody, depIssues);
                                     reqByIssues = (_d = task.requiredBy) === null || _d === void 0 ? void 0 : _d.map(function (reqBy) { return idToIssue["".concat(reqBy.id)]; }).filter(Boolean);
                                     issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
-                                    if (!(issue.expectedBody !== issue.body)) return [3 /*break*/, 2];
+                                    shouldBeBlocked = isIssueBlocked(task, idToIssue);
+                                    return [4 /*yield*/, updateBlockedLabel(issue, shouldBeBlocked)];
+                                case 1:
+                                    _r.sent();
+                                    if (!(issue.expectedBody !== issue.body)) return [3 /*break*/, 3];
                                     return [4 /*yield*/, octokit.issues.update({
                                             owner: GITHUB_OWNER,
                                             repo: GITHUB_REPO,
                                             issue_number: issue.number,
                                             body: issue.expectedBody,
                                         })];
-                                case 1:
+                                case 2:
                                     _r.sent();
                                     console.log("Updated issue #".concat(issue.number, " with dependencies/required-bys."));
-                                    _r.label = 2;
-                                case 2:
-                                    if (!task.subtasks) return [3 /*break*/, 6];
-                                    _p = 0, _q = task.subtasks;
                                     _r.label = 3;
                                 case 3:
-                                    if (!(_p < _q.length)) return [3 /*break*/, 6];
+                                    if (!task.subtasks) return [3 /*break*/, 8];
+                                    _p = 0, _q = task.subtasks;
+                                    _r.label = 4;
+                                case 4:
+                                    if (!(_p < _q.length)) return [3 /*break*/, 8];
                                     sub = _q[_p];
                                     issue_1 = idToIssue["".concat(task.id, ".").concat(sub.id)];
                                     depIssues_1 = (_e = sub.dependencies) === null || _e === void 0 ? void 0 : _e.map(function (depId) { return idToIssue["".concat(task.id, ".").concat(depId)]; }).filter(Boolean);
                                     issue_1.expectedBody = updateIssueWithDependencies(issue_1.expectedBody, depIssues_1);
                                     reqByIssues_1 = (_f = sub.requiredBy) === null || _f === void 0 ? void 0 : _f.map(function (reqBy) { return idToIssue["".concat(task.id, ".").concat(reqBy.id)]; }).filter(Boolean);
                                     issue_1.expectedBody = updateBodyWithRequiredBy(issue_1.expectedBody, reqByIssues_1);
-                                    if (!(issue_1.expectedBody !== issue_1.body)) return [3 /*break*/, 5];
+                                    shouldBeBlocked_1 = isIssueBlocked(sub, idToIssue, task);
+                                    return [4 /*yield*/, updateBlockedLabel(issue_1, shouldBeBlocked_1)];
+                                case 5:
+                                    _r.sent();
+                                    if (!(issue_1.expectedBody !== issue_1.body)) return [3 /*break*/, 7];
                                     return [4 /*yield*/, octokit.issues.update({
                                             owner: GITHUB_OWNER,
                                             repo: GITHUB_REPO,
                                             issue_number: issue_1.number,
                                             body: issue_1.expectedBody,
                                         })];
-                                case 4:
+                                case 6:
                                     _r.sent();
                                     console.log("Updated issue #".concat(issue_1.number, " with dependencies/required-bys."));
-                                    _r.label = 5;
-                                case 5:
+                                    _r.label = 7;
+                                case 7:
                                     _p++;
-                                    return [3 /*break*/, 3];
-                                case 6: return [2 /*return*/];
+                                    return [3 /*break*/, 4];
+                                case 8: return [2 /*return*/];
                             }
                         });
                     };
