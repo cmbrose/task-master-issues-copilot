@@ -9,6 +9,9 @@ dev-debug.log
 # Dependency directories
 node_modules/
 
+# Build outputs
+# Note: actions/*/dist/ directories are committed for GitHub Actions
+
 # Environment variables
 .env
 

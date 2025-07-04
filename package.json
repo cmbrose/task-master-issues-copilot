@@ -6,14 +6,21 @@
     "scripts": {
         "start": "ts-node create-issues.ts",
         "build": "tsc create-issues.ts",
+        "build:actions": "npm run build:generate && npm run build:breakdown && npm run build:watcher",
+        "build:generate": "ncc build actions/taskmaster-generate/src/main.ts -o actions/taskmaster-generate/dist",
+        "build:breakdown": "ncc build actions/taskmaster-breakdown/src/main.ts -o actions/taskmaster-breakdown/dist",
+        "build:watcher": "ncc build actions/taskmaster-watcher/src/main.ts -o actions/taskmaster-watcher/dist",
         "lint": "tsc --noEmit"
     },
     "dependencies": {
+        "@actions/core": "^1.10.1",
+        "@actions/github": "^6.0.0",
         "@octokit/rest": "^20.0.0",
         "dotenv": "^16.0.0"
     },
     "devDependencies": {
         "@types/node": "^20.0.0",
+        "@vercel/ncc": "^0.38.1",
         "ts-node": "^10.0.0",
         "typescript": "^5.0.0"
     },

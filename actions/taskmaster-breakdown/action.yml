@@ -1,0 +1,34 @@
+name: 'Taskmaster Breakdown'
+description: 'Break down GitHub issues into sub-tasks via comment command'
+author: 'Taskmaster Team'
+
+inputs:
+  breakdown-max-depth:
+    description: 'Maximum depth for breakdown recursion'
+    required: false
+    default: '2'
+  complexity-threshold:
+    description: 'Complexity threshold for breakdown'
+    required: false
+    default: '40'
+  taskmaster-args:
+    description: 'Additional arguments to pass to Taskmaster CLI'
+    required: false
+    default: ''
+  github-token:
+    description: 'GitHub token for API access'
+    required: true
+
+outputs:
+  sub-issues-created:
+    description: 'Number of sub-issues created'
+  parent-issue-updated:
+    description: 'Whether the parent issue was updated'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+
+branding:
+  icon: 'git-branch'
+  color: 'purple'
