@@ -1,0 +1,83 @@
+name: Taskmaster Example
+
+on:
+  # Example of using workflow_dispatch with input validation
+  workflow_dispatch:
+    inputs:
+      prd-file:
+        description: 'Specific PRD file to process (optional)'
+        required: false
+        type: string
+      complexity:
+        description: 'Complexity threshold'
+        required: false
+        default: '40'
+        type: choice
+        options:
+          - '20'
+          - '30'
+          - '40'
+          - '50'
+          - '60'
+      mode:
+        description: 'Processing mode'
+        required: false
+        default: 'generate'
+        type: choice
+        options:
+          - 'generate'
+          - 'breakdown'
+          - 'watcher'
+          - 'full'
+
+  # Example of push trigger for specific files
+  push:
+    paths:
+      - 'docs/**.prd.md'
+    branches:
+      - main
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Inputs (for manual dispatch)
+        if: github.event_name == 'workflow_dispatch' && inputs.prd-file != ''
+        run: |
+          # Validate PRD file exists
+          if [[ ! -f "${{ inputs.prd-file }}" ]]; then
+            echo "❌ PRD file not found: ${{ inputs.prd-file }}"
+            exit 1
+          fi
+          
+          # Validate file extension
+          if [[ ! "${{ inputs.prd-file }}" =~ \.prd\.md$ ]]; then
+            echo "❌ File must have .prd.md extension: ${{ inputs.prd-file }}"
+            exit 1
+          fi
+          
+          echo "✅ PRD file validation passed"
+
+      - name: Run Taskmaster with Input Validation
+        uses: ./
+        with:
+          complexity-threshold: ${{ github.event_name == 'workflow_dispatch' && inputs.complexity || '40' }}
+          prd-path-glob: ${{ github.event_name == 'workflow_dispatch' && inputs.prd-file && inputs.prd-file || 'docs/**.prd.md' }}
+          action-mode: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'generate' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Display Results
+        run: |
+          echo "## Example Workflow Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Trigger: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Mode: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'generate' }}" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.prd-file }}" ]]; then
+            echo "- PRD File: ${{ inputs.prd-file }}" >> $GITHUB_STEP_SUMMARY
+          fi

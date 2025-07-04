@@ -85,6 +85,68 @@ This repository provides GitHub Actions that automatically generate hierarchical
 
 3. **Push to trigger** automatic issue generation from your PRD
 
+## Trigger Configuration
+
+The Taskmaster workflow supports multiple trigger types with automatic mode detection:
+
+### Supported Triggers
+
+- **📝 Manual Dispatch** (`workflow_dispatch`) - Manual execution with parameter validation
+- **🚀 PRD Changes** (`push`) - Automatic processing of PRD file changes  
+- **💬 Issue Comments** (`issue_comment`) - `/breakdown` command processing
+- **📋 Issue Updates** (`issues`) - Dependency tracking on issue closure
+- **⏰ Scheduled Runs** (`schedule`) - Periodic dependency resolution
+
+### Comprehensive Example
+
+```yaml
+name: Taskmaster Complete Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      complexity-threshold:
+        description: 'Complexity threshold (1-100)'
+        required: false
+        default: '40'
+        type: string
+      action-mode:
+        description: 'Action mode'
+        required: false
+        default: 'full'
+        type: choice
+        options: ['full', 'generate', 'breakdown', 'watcher']
+  
+  push:
+    paths: ['docs/**.prd.md']
+    branches: [main]
+  
+  issue_comment:
+    types: [created]
+  
+  issues:
+    types: [closed, reopened]
+  
+  schedule:
+    - cron: '*/10 9-18 * * 1-5'  # Business hours
+    - cron: '0 * * * *'          # Off-hours
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  taskmaster:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cmbrose/task-master-issues@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+For detailed trigger configuration, see [Trigger Configuration Guide](docs/trigger-configuration.md).
+
 ### Alternative: Use Individual Actions
 
 You can also use the individual actions separately:
