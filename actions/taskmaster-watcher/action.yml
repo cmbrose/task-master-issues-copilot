@@ -1,0 +1,26 @@
+name: 'Taskmaster Watcher'
+description: 'Watch for issue changes and update dependencies/blocked status'
+author: 'Taskmaster Team'
+
+inputs:
+  github-token:
+    description: 'GitHub token for API access'
+    required: true
+  scan-mode:
+    description: 'Scan mode: webhook (single issue) or full (all issues)'
+    required: false
+    default: 'webhook'
+
+outputs:
+  issues-updated:
+    description: 'Number of issues with updated blocked status'
+  dependencies-resolved:
+    description: 'Number of dependency chains resolved'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+
+branding:
+  icon: 'eye'
+  color: 'green'
