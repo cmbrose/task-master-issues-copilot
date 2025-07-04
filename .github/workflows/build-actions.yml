@@ -37,9 +37,14 @@ jobs:
       - name: Build actions
         run: npm run build:actions
         
-      - name: Check for uncommitted changes
+      - name: Commit built dist files
         run: |
-          if ! git diff --exit-code actions/*/dist/; then
-            echo "::error::Uncommitted changes found in dist/ directories. Please run 'npm run build:actions' and commit the changes."
-            exit 1
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add actions/*/dist/
+          if ! git diff --cached --exit-code; then
+            git commit -m "Build: Update action dist files"
+            git push
+          else
+            echo "No changes to dist files"
           fi
