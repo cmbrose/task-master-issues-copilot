@@ -1,0 +1,11 @@
+# Build outputs
+dist/
+*.js
+*.js.map
+*.d.ts
+
+# Dependencies
+node_modules/
+
+# Test files
+test-manual.ts
