@@ -1,29 +1,29 @@
 name: 'Taskmaster Breakdown'
-description: 'Break down GitHub issues into sub-tasks via comment command'
-author: 'Taskmaster Team'
+description: 'Break down GitHub issues into manageable sub-tasks via slash commands. Triggered by issue comments starting with "/breakdown".'
+author: 'cmbrose'
 
 inputs:
   breakdown-max-depth:
-    description: 'Maximum depth for breakdown recursion'
+    description: 'Maximum depth for breakdown recursion. Controls how many levels deep the task decomposition will go.'
     required: false
     default: '2'
   complexity-threshold:
-    description: 'Complexity threshold for breakdown'
+    description: 'Complexity threshold for task breakdown. Tasks with complexity scores above this value will be further decomposed.'
     required: false
     default: '40'
   taskmaster-args:
-    description: 'Additional arguments to pass to Taskmaster CLI'
+    description: 'Additional command-line arguments to pass to the Taskmaster CLI tool for advanced configuration.'
     required: false
     default: ''
   github-token:
-    description: 'GitHub token for API access'
+    description: 'GitHub personal access token with Issues write permissions for creating sub-issues and updating parent issues.'
     required: true
 
 outputs:
   sub-issues-created:
-    description: 'Number of sub-issues created'
+    description: 'Number of sub-issues successfully created during the breakdown process (integer)'
   parent-issue-updated:
-    description: 'Whether the parent issue was updated'
+    description: 'Boolean indicator whether the parent issue was successfully updated with sub-issue links (true/false)'
 
 runs:
   using: 'node20'
