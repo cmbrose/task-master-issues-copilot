@@ -4,12 +4,14 @@ on:
   push:
     paths:
       - 'actions/**/*.ts'
+      - 'actions/**/*.yml'
       - 'package*.json'
       - 'tsconfig.json'
       - '.github/workflows/build-actions.yml'
   pull_request:
     paths:
       - 'actions/**/*.ts'
+      - 'actions/**/*.yml'
       - 'package*.json'
       - 'tsconfig.json'
       - '.github/workflows/build-actions.yml'

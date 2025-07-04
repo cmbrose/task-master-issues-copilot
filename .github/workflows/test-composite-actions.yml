@@ -1,0 +1,66 @@
+name: Test Composite Actions
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'actions/**/*.yml'
+      - 'actions/**/*.yaml'
+
+jobs:
+  test-taskmaster-generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Test Taskmaster Generate Action
+        id: generate
+        uses: ./actions/taskmaster-generate
+        with:
+          complexity-threshold: '50'
+          max-depth: '2'
+          prd-path-glob: 'docs/**.prd.md'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Verify outputs
+        run: |
+          echo "Task graph: ${{ steps.generate.outputs.task-graph }}"
+          echo "Issues created: ${{ steps.generate.outputs.issues-created }}"
+
+  test-taskmaster-breakdown:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Test Taskmaster Breakdown Action
+        id: breakdown
+        uses: ./actions/taskmaster-breakdown
+        with:
+          breakdown-max-depth: '3'
+          complexity-threshold: '30'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Verify outputs
+        run: |
+          echo "Sub-issues created: ${{ steps.breakdown.outputs.sub-issues-created }}"
+          echo "Parent issue updated: ${{ steps.breakdown.outputs.parent-issue-updated }}"
+
+  test-taskmaster-watcher:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Test Taskmaster Watcher Action
+        id: watcher
+        uses: ./actions/taskmaster-watcher
+        with:
+          scan-mode: 'full'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Verify outputs
+        run: |
+          echo "Issues updated: ${{ steps.watcher.outputs.issues-updated }}"
+          echo "Dependencies resolved: ${{ steps.watcher.outputs.dependencies-resolved }}"
