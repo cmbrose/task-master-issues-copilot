@@ -13,7 +13,11 @@ Welcome to the `task-master-issues` repository! This document provides guidance 
     This file contains the list of Taskmaster tasks, their metadata, and configuration. You may use this to understand task structure, requirements, and dependencies.
   - **`docs/initial-release.prd.md`:**  
     The PRD outlines feature requirements, user stories, and high-level goals. You may consult this for broader context or clarification on task intent.
-
+  - **Issues:**
+    All issues created for a PRD will contain their immediate dependencies issues (which should be closed before working on an issue) and issues which require the issue in question (which
+    cannot be started until at least the issue in question is closed). This next-neighbor dependency structure can help guide work to understand what tasks the issue is building off of in
+    addition to what work will immediately depend on it.
+    
 - **Code Standards:**
   This repo will host public GitHub Actions. Ensure that all best practices for hosting multiple actions within the repo are considered and followed. Especially consider the needs
   of users of the actions being built, users who are not familiar with the inner workings, when desiging interfaces for them to use.
