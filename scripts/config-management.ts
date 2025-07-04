@@ -39,6 +39,11 @@ export interface TaskmasterConfig {
   
   // Action mode
   actionMode: 'generate' | 'breakdown' | 'watcher' | 'full';
+  
+  // Output format preferences
+  outputFormat: 'json' | 'xml' | 'text' | 'auto';
+  outputSanitize: boolean;
+  outputMaxSize: number;
 }
 
 /**
@@ -80,7 +85,10 @@ export const DEFAULT_CONFIG: TaskmasterConfig = {
   taskmasterArgs: '',
   forceDownload: false,
   githubToken: '',
-  actionMode: 'full'
+  actionMode: 'full',
+  outputFormat: 'auto',
+  outputSanitize: true,
+  outputMaxSize: 1048576 // 1MB default
 };
 
 /**
@@ -185,6 +193,43 @@ export const VALIDATION_RULES: ValidationRule[] = [
       return true;
     },
     sanitize: (value: any) => String(value).trim()
+  },
+  {
+    key: 'outputFormat',
+    validate: (value: string) => {
+      if (!['json', 'xml', 'text', 'auto'].includes(value)) {
+        return 'Output format must be one of: json, xml, text, auto';
+      }
+      return true;
+    },
+    sanitize: (value: any) => String(value).toLowerCase()
+  },
+  {
+    key: 'outputSanitize',
+    validate: (value: boolean) => {
+      if (typeof value !== 'boolean') {
+        return 'Output sanitize must be a boolean value';
+      }
+      return true;
+    },
+    sanitize: (value: any) => {
+      if (typeof value === 'boolean') return value;
+      if (typeof value === 'string') {
+        const lower = value.toLowerCase();
+        return lower === 'true' || lower === '1' || lower === 'yes';
+      }
+      return Boolean(value);
+    }
+  },
+  {
+    key: 'outputMaxSize',
+    validate: (value: number) => {
+      if (typeof value !== 'number' || value < 1 || value > 10485760) { // 10MB max
+        return 'Output max size must be a number between 1 and 10485760 bytes (10MB)';
+      }
+      return true;
+    },
+    sanitize: (value: any) => Math.max(1, Math.min(10485760, Number(value)))
   }
 ];
 
@@ -261,7 +306,10 @@ export function loadFromEnvironment(): Partial<TaskmasterConfig> {
     ['taskmasterArgs', ['INPUT_TASKMASTER-ARGS', 'INPUT_TASKMASTER_ARGS', 'TM_TASKMASTER_ARGS']],
     ['forceDownload', ['INPUT_FORCE-DOWNLOAD', 'INPUT_FORCE_DOWNLOAD', 'TM_FORCE_DOWNLOAD']],
     ['githubToken', ['INPUT_GITHUB-TOKEN', 'INPUT_GITHUB_TOKEN', 'TM_GITHUB_TOKEN', 'GITHUB_TOKEN']],
-    ['actionMode', ['INPUT_ACTION-MODE', 'INPUT_ACTION_MODE', 'TM_ACTION_MODE']]
+    ['actionMode', ['INPUT_ACTION-MODE', 'INPUT_ACTION_MODE', 'TM_ACTION_MODE']],
+    ['outputFormat', ['INPUT_OUTPUT-FORMAT', 'INPUT_OUTPUT_FORMAT', 'TM_OUTPUT_FORMAT']],
+    ['outputSanitize', ['INPUT_OUTPUT-SANITIZE', 'INPUT_OUTPUT_SANITIZE', 'TM_OUTPUT_SANITIZE']],
+    ['outputMaxSize', ['INPUT_OUTPUT-MAX-SIZE', 'INPUT_OUTPUT_MAX_SIZE', 'TM_OUTPUT_MAX_SIZE']]
   ];
 
   for (const [configKey, envKeys] of envMappings) {

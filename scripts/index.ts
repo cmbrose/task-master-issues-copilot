@@ -90,3 +90,13 @@ export {
   type FormatConversionOptions,
   type ConversionResult
 } from './output-validation';
+
+// Export output processing integration utilities
+export {
+  processCliOutput,
+  validateCliOutput,
+  getOutputConfigFromEnvironment,
+  createOutputProcessor,
+  type OutputProcessingOptions,
+  type OutputProcessingResult
+} from './output-processing';
