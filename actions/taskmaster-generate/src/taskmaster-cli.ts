@@ -7,7 +7,7 @@
 
 import * as core from '@actions/core';
 import * as path from 'path';
-import { downloadBinary, BinaryDownloadOptions, BinaryInfo } from '@scripts/index';
+import { downloadBinary, BinaryDownloadOptions, BinaryInfo, TaskmasterConfig, loadFromEnvironment } from '@scripts/index';
 
 /**
  * Configuration for Taskmaster CLI setup
@@ -74,12 +74,24 @@ export async function setupTaskmasterCli(config: TaskmasterCliConfig): Promise<B
 
 /**
  * Get Taskmaster CLI setup from GitHub Actions inputs
+ * @deprecated Use the new configuration management system instead
  */
 export function getTaskmasterConfigFromInputs(): TaskmasterCliConfig {
   return {
     version: core.getInput('taskmaster-version') || DEFAULT_CONFIG.version,
     baseUrl: core.getInput('taskmaster-base-url') || DEFAULT_CONFIG.baseUrl,
     forceDownload: core.getBooleanInput('force-download')
+  };
+}
+
+/**
+ * Get Taskmaster CLI configuration from the centralized config system
+ */
+export function getTaskmasterConfigFromCentralized(config: TaskmasterConfig): TaskmasterCliConfig {
+  return {
+    version: config.taskmasterVersion,
+    baseUrl: config.taskmasterBaseUrl,
+    forceDownload: config.forceDownload
   };
 }
 

@@ -55,3 +55,22 @@ export {
   type WrapperScriptOptions,
   type WrapperScriptInfo
 } from './wrapper-scripts';
+
+// Export configuration management utilities
+export {
+  loadConfig,
+  loadFromEnvironment,
+  loadFromFile,
+  saveConfig,
+  validateConfig,
+  findConfigFiles,
+  getConfigValue,
+  createPreset,
+  DEFAULT_CONFIG,
+  VALIDATION_RULES,
+  type TaskmasterConfig,
+  type ConfigFile,
+  type ConfigLoadOptions,
+  type ValidationResult,
+  type ValidationRule
+} from './config-management';

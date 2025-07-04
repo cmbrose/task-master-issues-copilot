@@ -1,0 +1,45 @@
+# Taskmaster Configuration Example
+# 
+# This file demonstrates the configuration management system
+# Save this as .taskmaster.yml in your repository root for project-wide defaults
+
+taskmaster:
+  # Task generation parameters
+  complexityThreshold: 45
+  maxDepth: 3
+  prdPathGlob: "docs/**/*.prd.md"
+  
+  # Breakdown parameters
+  breakdownMaxDepth: 2
+  
+  # Watcher parameters
+  scanMode: "webhook"
+  
+  # CLI parameters
+  taskmasterVersion: "1.0.0"
+  taskmasterBaseUrl: "https://github.com/taskmaster-ai/taskmaster/releases/download"
+  taskmasterArgs: ""
+  forceDownload: false
+  
+  # Action mode
+  actionMode: "full"
+
+# Environment-specific configurations
+environments:
+  development:
+    complexityThreshold: 30
+    maxDepth: 2
+    scanMode: "full"
+    forceDownload: true
+  
+  production:
+    complexityThreshold: 50
+    maxDepth: 4
+    scanMode: "webhook"
+    forceDownload: false
+  
+  testing:
+    complexityThreshold: 20
+    maxDepth: 1
+    scanMode: "webhook"
+    forceDownload: true
