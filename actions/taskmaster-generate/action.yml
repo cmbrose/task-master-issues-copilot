@@ -30,8 +30,22 @@ outputs:
     description: 'Number of issues created or updated'
 
 runs:
-  using: 'node20'
-  main: 'dist/index.js'
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Run Taskmaster Generate
+      run: node ${{ github.action_path }}/dist/index.js
+      shell: bash
+      env:
+        INPUT_COMPLEXITY-THRESHOLD: ${{ inputs.complexity-threshold }}
+        INPUT_MAX-DEPTH: ${{ inputs.max-depth }}
+        INPUT_PRD-PATH-GLOB: ${{ inputs.prd-path-glob }}
+        INPUT_TASKMASTER-ARGS: ${{ inputs.taskmaster-args }}
+        INPUT_GITHUB-TOKEN: ${{ inputs.github-token }}
 
 branding:
   icon: 'list'

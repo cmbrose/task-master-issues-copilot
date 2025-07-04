@@ -18,8 +18,19 @@ outputs:
     description: 'Number of dependency chains resolved'
 
 runs:
-  using: 'node20'
-  main: 'dist/index.js'
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Run Taskmaster Watcher
+      run: node ${{ github.action_path }}/dist/index.js
+      shell: bash
+      env:
+        INPUT_GITHUB-TOKEN: ${{ inputs.github-token }}
+        INPUT_SCAN-MODE: ${{ inputs.scan-mode }}
 
 branding:
   icon: 'eye'

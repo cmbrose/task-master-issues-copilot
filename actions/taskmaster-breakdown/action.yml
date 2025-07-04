@@ -26,8 +26,21 @@ outputs:
     description: 'Boolean indicator whether the parent issue was successfully updated with sub-issue links (true/false)'
 
 runs:
-  using: 'node20'
-  main: 'dist/index.js'
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Run Taskmaster Breakdown
+      run: node ${{ github.action_path }}/dist/index.js
+      shell: bash
+      env:
+        INPUT_BREAKDOWN-MAX-DEPTH: ${{ inputs.breakdown-max-depth }}
+        INPUT_COMPLEXITY-THRESHOLD: ${{ inputs.complexity-threshold }}
+        INPUT_TASKMASTER-ARGS: ${{ inputs.taskmaster-args }}
+        INPUT_GITHUB-TOKEN: ${{ inputs.github-token }}
 
 branding:
   icon: 'git-branch'
