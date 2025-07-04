@@ -30,7 +30,8 @@ export {
   listAvailableVersions,
   cleanupOldVersions,
   type BinaryDownloadOptions,
-  type BinaryInfo
+  type BinaryInfo,
+  type ChecksumOptions
 } from './binary-downloader';
 
 // Export platform utilities

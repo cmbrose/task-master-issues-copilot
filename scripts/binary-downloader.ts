@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as https from 'https';
 import * as http from 'http';
+import * as crypto from 'crypto';
 import { detectPlatform, getBinaryDownloadUrl, PlatformInfo } from './platform-utils';
 
 export interface BinaryDownloadOptions {
@@ -22,6 +23,17 @@ export interface BinaryDownloadOptions {
   platform?: PlatformInfo;
   /** Force re-download even if binary exists */
   forceDownload?: boolean;
+  /** Checksum validation options */
+  checksum?: ChecksumOptions;
+}
+
+export interface ChecksumOptions {
+  /** Expected checksum value */
+  value?: string;
+  /** Hash algorithm to use (defaults to 'sha256') */
+  algorithm?: 'sha256' | 'sha512';
+  /** URL to retrieve checksum from (alternative to providing value directly) */
+  url?: string;
 }
 
 export interface BinaryInfo {
@@ -33,6 +45,126 @@ export interface BinaryInfo {
   platform: PlatformInfo;
   /** Whether the binary was newly downloaded */
   downloaded: boolean;
+  /** Checksum verification result */
+  checksumVerified?: boolean;
+}
+
+/**
+ * Calculate checksum of a file using the specified algorithm
+ */
+async function calculateChecksum(filePath: string, algorithm: 'sha256' | 'sha512' = 'sha256'): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash(algorithm);
+    const stream = fs.createReadStream(filePath);
+
+    stream.on('data', (chunk) => {
+      hash.update(chunk);
+    });
+
+    stream.on('end', () => {
+      resolve(hash.digest('hex'));
+    });
+
+    stream.on('error', (error) => {
+      reject(new Error(`Failed to calculate checksum for ${filePath}: ${error.message}`));
+    });
+  });
+}
+
+/**
+ * Retrieve checksum from a remote URL
+ */
+async function retrieveRemoteChecksum(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https:') ? https : http;
+
+    const request = client.get(url, (response) => {
+      // Handle redirects
+      if (response.statusCode === 301 || response.statusCode === 302) {
+        const redirectUrl = response.headers.location;
+        if (redirectUrl) {
+          retrieveRemoteChecksum(redirectUrl).then(resolve).catch(reject);
+          return;
+        }
+      }
+
+      if (response.statusCode !== 200) {
+        reject(new Error(`Failed to retrieve checksum from ${url}: HTTP ${response.statusCode}`));
+        return;
+      }
+
+      let data = '';
+      response.on('data', (chunk) => {
+        data += chunk;
+      });
+
+      response.on('end', () => {
+        // Extract checksum from response (assume it's the first hash-like string)
+        const checksumMatch = data.trim().match(/^([a-fA-F0-9]{64,128})/);
+        if (checksumMatch) {
+          resolve(checksumMatch[1].toLowerCase());
+        } else {
+          reject(new Error(`Invalid checksum format from ${url}: ${data.slice(0, 100)}`));
+        }
+      });
+    });
+
+    request.on('error', (error) => {
+      reject(new Error(`Failed to retrieve checksum from ${url}: ${error.message}`));
+    });
+
+    request.setTimeout(30000, () => {
+      request.destroy();
+      reject(new Error(`Timeout retrieving checksum from ${url}`));
+    });
+  });
+}
+
+/**
+ * Verify checksum of a downloaded binary
+ */
+async function verifyChecksum(
+  filePath: string, 
+  checksumOptions: ChecksumOptions
+): Promise<void> {
+  const algorithm = checksumOptions.algorithm || 'sha256';
+  let expectedChecksum: string;
+
+  // Get expected checksum value
+  if (checksumOptions.value) {
+    expectedChecksum = checksumOptions.value.toLowerCase();
+  } else if (checksumOptions.url) {
+    expectedChecksum = await retrieveRemoteChecksum(checksumOptions.url);
+  } else {
+    throw new Error('Checksum validation requested but no checksum value or URL provided');
+  }
+
+  // Calculate actual checksum
+  const actualChecksum = await calculateChecksum(filePath, algorithm);
+
+  // Secure comparison to prevent timing attacks
+  if (!secureCompare(expectedChecksum, actualChecksum)) {
+    throw new Error(
+      `Checksum verification failed for ${filePath}. ` +
+      `Expected: ${expectedChecksum}, Got: ${actualChecksum} (${algorithm})`
+    );
+  }
+}
+
+/**
+ * Secure string comparison to prevent timing attacks
+ */
+function secureCompare(expected: string, actual: string): boolean {
+  if (expected.length !== actual.length) {
+    return false;
+  }
+
+  let result = 0;
+  for (let i = 0; i < expected.length; i++) {
+    result |= expected.charCodeAt(i) ^ actual.charCodeAt(i);
+  }
+
+  return result === 0;
 }
 
 /**
@@ -122,12 +254,34 @@ export async function downloadBinary(options: BinaryDownloadOptions): Promise<Bi
 
   // Check if binary already exists and is valid
   if (!options.forceDownload && binaryExists(binaryPath)) {
-    return {
-      binaryPath,
-      version: options.version,
-      platform,
-      downloaded: false
-    };
+    let checksumVerified: boolean | undefined;
+    
+    // Verify checksum of existing binary if checksum options provided
+    if (options.checksum) {
+      try {
+        await verifyChecksum(binaryPath, options.checksum);
+        checksumVerified = true;
+      } catch (error) {
+        // If checksum verification fails for existing binary, re-download
+        if (error instanceof Error && error.message.includes('Checksum verification failed')) {
+          // Fall through to download section
+          checksumVerified = false;
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    // Return if we successfully verified the existing binary or no checksum was requested
+    if (checksumVerified === true || checksumVerified === undefined) {
+      return {
+        binaryPath,
+        version: options.version,
+        platform,
+        downloaded: false,
+        checksumVerified
+      };
+    }
   }
 
   // Generate download URL
@@ -145,11 +299,29 @@ export async function downloadBinary(options: BinaryDownloadOptions): Promise<Bi
     throw new Error(`Downloaded binary is not valid: ${binaryPath}`);
   }
 
+  // Verify checksum if provided
+  let checksumVerified: boolean | undefined;
+  if (options.checksum) {
+    try {
+      await verifyChecksum(binaryPath, options.checksum);
+      checksumVerified = true;
+    } catch (error) {
+      // Clean up invalid binary
+      try {
+        fs.unlinkSync(binaryPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+      throw error;
+    }
+  }
+
   return {
     binaryPath,
     version: options.version,
     platform,
-    downloaded: true
+    downloaded: true,
+    checksumVerified
   };
 }
 
