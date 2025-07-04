@@ -1,0 +1,34 @@
+{
+  "taskmaster": {
+    "complexityThreshold": 45,
+    "maxDepth": 3,
+    "prdPathGlob": "docs/**/*.prd.md",
+    "breakdownMaxDepth": 2,
+    "scanMode": "webhook",
+    "taskmasterVersion": "1.0.0",
+    "taskmasterBaseUrl": "https://github.com/taskmaster-ai/taskmaster/releases/download",
+    "taskmasterArgs": "",
+    "forceDownload": false,
+    "actionMode": "full"
+  },
+  "environments": {
+    "development": {
+      "complexityThreshold": 30,
+      "maxDepth": 2,
+      "scanMode": "full",
+      "forceDownload": true
+    },
+    "production": {
+      "complexityThreshold": 50,
+      "maxDepth": 4,
+      "scanMode": "webhook",
+      "forceDownload": false
+    },
+    "testing": {
+      "complexityThreshold": 20,
+      "maxDepth": 1,
+      "scanMode": "webhook",
+      "forceDownload": true
+    }
+  }
+}

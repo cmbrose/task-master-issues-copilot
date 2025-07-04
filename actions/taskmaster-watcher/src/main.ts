@@ -7,14 +7,27 @@
 
 import * as core from '@actions/core';
 import * as github from '@actions/github';
+import { loadConfig, TaskmasterConfig } from '@scripts/index';
 
 async function run(): Promise<void> {
   try {
-    // Get inputs
-    const githubToken = core.getInput('github-token');
-    const scanMode = core.getInput('scan-mode');
+    core.info('👁️ Starting Taskmaster Watcher action');
 
-    core.info(`Starting taskmaster-watcher in ${scanMode} mode`);
+    // Load configuration with priority: defaults < config files < env vars < action inputs
+    const config = loadConfig(
+      {
+        validate: true,
+        baseDir: process.cwd()
+      },
+      {
+        // Action input overrides
+        githubToken: core.getInput('github-token') || undefined,
+        scanMode: (core.getInput('scan-mode') as 'webhook' | 'full') || undefined
+      }
+    );
+
+    core.info(`📋 Configuration loaded:`);
+    core.info(`  • Scan mode: ${config.scanMode}`);
 
     // TODO: Implement action logic
     // 1. Gather dependent issues (from payload YAML or full scan)
@@ -25,9 +38,11 @@ async function run(): Promise<void> {
     core.setOutput('issues-updated', '0');
     core.setOutput('dependencies-resolved', '0');
     
-    core.info('Taskmaster Watcher completed successfully');
+    core.info('✅ Taskmaster Watcher completed successfully');
   } catch (error) {
-    core.setFailed(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
+    const errorMessage = `Action failed: ${error instanceof Error ? error.message : String(error)}`;
+    core.setFailed(errorMessage);
+    core.error(errorMessage);
   }
 }
 

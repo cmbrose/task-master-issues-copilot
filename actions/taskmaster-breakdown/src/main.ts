@@ -7,16 +7,33 @@
 
 import * as core from '@actions/core';
 import * as github from '@actions/github';
+import { loadConfig, TaskmasterConfig } from '@scripts/index';
 
 async function run(): Promise<void> {
   try {
-    // Get inputs
-    const breakdownMaxDepth = core.getInput('breakdown-max-depth');
-    const complexityThreshold = core.getInput('complexity-threshold');
-    const taskmasterArgs = core.getInput('taskmaster-args');
-    const githubToken = core.getInput('github-token');
+    core.info('🔨 Starting Taskmaster Breakdown action');
 
-    core.info(`Starting taskmaster-breakdown with max-depth: ${breakdownMaxDepth}, threshold: ${complexityThreshold}`);
+    // Load configuration with priority: defaults < config files < env vars < action inputs
+    const config = loadConfig(
+      {
+        validate: true,
+        baseDir: process.cwd()
+      },
+      {
+        // Action input overrides
+        breakdownMaxDepth: core.getInput('breakdown-max-depth') ? 
+          parseInt(core.getInput('breakdown-max-depth'), 10) : undefined,
+        complexityThreshold: core.getInput('complexity-threshold') ? 
+          parseInt(core.getInput('complexity-threshold'), 10) : undefined,
+        taskmasterArgs: core.getInput('taskmaster-args') || undefined,
+        githubToken: core.getInput('github-token') || undefined
+      }
+    );
+
+    core.info(`📋 Configuration loaded:`);
+    core.info(`  • Breakdown max depth: ${config.breakdownMaxDepth}`);
+    core.info(`  • Complexity threshold: ${config.complexityThreshold}`);
+    core.info(`  • Taskmaster args: ${config.taskmasterArgs || 'none'}`);
 
     // TODO: Implement action logic
     // 1. Parse comment for breakdown command arguments
@@ -30,9 +47,11 @@ async function run(): Promise<void> {
     core.setOutput('sub-issues-created', '0');
     core.setOutput('parent-issue-updated', 'false');
     
-    core.info('Taskmaster Breakdown completed successfully');
+    core.info('✅ Taskmaster Breakdown completed successfully');
   } catch (error) {
-    core.setFailed(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
+    const errorMessage = `Action failed: ${error instanceof Error ? error.message : String(error)}`;
+    core.setFailed(errorMessage);
+    core.error(errorMessage);
   }
 }
 
