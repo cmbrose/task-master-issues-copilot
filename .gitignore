@@ -8,9 +8,11 @@ dev-debug.log
 
 # Dependency directories
 node_modules/
+actions/*/node_modules/
 
 # Build outputs
-# Note: actions/*/dist/ directories are committed for GitHub Actions
+# Note: dist/ directories are no longer used with direct TypeScript execution
+actions/*/dist/
 
 # Environment variables
 .env
