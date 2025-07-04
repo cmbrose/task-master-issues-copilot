@@ -7,6 +7,8 @@
 
 import * as core from '@actions/core';
 import * as path from 'path';
+import * as fs from 'fs';
+import { spawn } from 'child_process';
 import { downloadBinary, BinaryDownloadOptions, BinaryInfo, TaskmasterConfig, loadFromEnvironment } from '@scripts/index';
 
 /**
@@ -96,24 +98,182 @@ export function getTaskmasterConfigFromCentralized(config: TaskmasterConfig): Ta
 }
 
 /**
- * Example usage function showing how to integrate with an action
+ * Options for running Taskmaster CLI
  */
-export async function exampleIntegration(): Promise<void> {
+export interface TaskmasterRunOptions {
+  /** Path to PRD file or directory to process */
+  prdPath: string;
+  /** Complexity threshold (default: 40) */
+  complexityThreshold?: number;
+  /** Maximum depth for task breakdown (default: 3) */
+  maxDepth?: number;
+  /** Additional CLI arguments */
+  additionalArgs?: string[];
+  /** Output file path for task-graph.json (default: ./task-graph.json) */
+  outputPath?: string;
+  /** Working directory for CLI execution (default: current directory) */
+  workingDir?: string;
+  /** Timeout in milliseconds (default: 300000 = 5 minutes) */
+  timeout?: number;
+}
+
+/**
+ * Result of Taskmaster CLI execution
+ */
+export interface TaskmasterRunResult {
+  /** Exit code from the CLI */
+  exitCode: number;
+  /** Standard output from the CLI */
+  stdout: string;
+  /** Standard error from the CLI */
+  stderr: string;
+  /** Path to the generated task-graph.json file */
+  taskGraphPath: string;
+  /** Indicates if task-graph.json was successfully generated */
+  taskGraphGenerated: boolean;
+}
+
+/**
+ * Execute Taskmaster CLI with specified options to generate task graph
+ */
+export async function runTaskmasterCli(
+  binaryInfo: BinaryInfo,
+  options: TaskmasterRunOptions
+): Promise<TaskmasterRunResult> {
+  const {
+    prdPath,
+    complexityThreshold = 40,
+    maxDepth = 3,
+    additionalArgs = [],
+    outputPath = 'task-graph.json',
+    workingDir = process.cwd(),
+    timeout = 300000 // 5 minutes
+  } = options;
+
+  // Ensure absolute paths
+  const absolutePrdPath = path.resolve(workingDir, prdPath);
+  const absoluteOutputPath = path.resolve(workingDir, outputPath);
+  
+  // Verify PRD file exists
+  if (!fs.existsSync(absolutePrdPath)) {
+    throw new Error(`PRD file not found: ${absolutePrdPath}`);
+  }
+
+  // Build CLI arguments
+  const args = [
+    'generate',
+    '--prd', absolutePrdPath,
+    '--complexity-threshold', complexityThreshold.toString(),
+    '--max-depth', maxDepth.toString(),
+    '--output', absoluteOutputPath,
+    '--format', 'json',
+    ...additionalArgs
+  ];
+
+  core.info(`🚀 Executing Taskmaster CLI: ${binaryInfo.binaryPath} ${args.join(' ')}`);
+  core.info(`   Working directory: ${workingDir}`);
+  core.info(`   Complexity threshold: ${complexityThreshold}`);
+  core.info(`   Max depth: ${maxDepth}`);
+
+  return new Promise((resolve, reject) => {
+    const childProcess = spawn(binaryInfo.binaryPath, args, {
+      cwd: workingDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env }
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    childProcess.stdout.on('data', (data) => {
+      const output = data.toString();
+      stdout += output;
+      // Log CLI output in real-time for debugging
+      core.info(`CLI: ${output.trim()}`);
+    });
+
+    childProcess.stderr.on('data', (data) => {
+      const output = data.toString();
+      stderr += output;
+      // Log CLI errors in real-time
+      core.warning(`CLI Error: ${output.trim()}`);
+    });
+
+    // Set up timeout
+    const timeoutHandle = setTimeout(() => {
+      childProcess.kill('SIGTERM');
+      reject(new Error(`Taskmaster CLI execution timed out after ${timeout}ms`));
+    }, timeout);
+
+    childProcess.on('error', (error) => {
+      clearTimeout(timeoutHandle);
+      reject(new Error(`Failed to execute Taskmaster CLI: ${error.message}`));
+    });
+
+    childProcess.on('close', (exitCode) => {
+      clearTimeout(timeoutHandle);
+      
+      const taskGraphGenerated = fs.existsSync(absoluteOutputPath);
+      
+      const result: TaskmasterRunResult = {
+        exitCode: exitCode || 0,
+        stdout,
+        stderr,
+        taskGraphPath: absoluteOutputPath,
+        taskGraphGenerated
+      };
+
+      if (exitCode === 0) {
+        core.info(`✅ Taskmaster CLI completed successfully (exit code: ${exitCode})`);
+        if (taskGraphGenerated) {
+          core.info(`✅ Task graph generated at: ${absoluteOutputPath}`);
+        } else {
+          core.warning(`⚠️ CLI completed but task-graph.json not found at: ${absoluteOutputPath}`);
+        }
+        resolve(result);
+      } else {
+        const errorMessage = `Taskmaster CLI failed with exit code ${exitCode}`;
+        core.error(errorMessage);
+        if (stderr) {
+          core.error(`CLI stderr: ${stderr}`);
+        }
+        reject(new Error(`${errorMessage}\nStderr: ${stderr}`));
+      }
+    });
+  });
+}
+
+/**
+ * Validate that the generated task-graph.json has the expected structure
+ */
+export function validateTaskGraph(taskGraphPath: string): boolean {
   try {
-    // Get configuration from action inputs
-    const config = getTaskmasterConfigFromInputs();
-    
-    // Setup the CLI binary
-    const binaryInfo = await setupTaskmasterCli(config);
-    
-    // Now the binary is ready to use
-    core.info(`Taskmaster CLI ready at: ${binaryInfo.binaryPath}`);
-    
-    // In a real action, you would now execute the binary:
-    // const { spawn } = require('child_process');
-    // const result = spawn(binaryInfo.binaryPath, ['parse-prd', 'docs/example.prd.md']);
-    
+    if (!fs.existsSync(taskGraphPath)) {
+      core.error(`Task graph file not found: ${taskGraphPath}`);
+      return false;
+    }
+
+    const content = fs.readFileSync(taskGraphPath, 'utf8');
+    const taskGraph = JSON.parse(content);
+
+    // Basic validation of expected structure
+    if (!taskGraph || typeof taskGraph !== 'object') {
+      core.error('Task graph is not a valid JSON object');
+      return false;
+    }
+
+    // Check for essential properties (adjust based on actual Taskmaster CLI output)
+    const requiredFields = ['tasks', 'metadata'];
+    for (const field of requiredFields) {
+      if (!(field in taskGraph)) {
+        core.warning(`Task graph missing expected field: ${field}`);
+      }
+    }
+
+    core.info('✅ Task graph validation completed');
+    return true;
   } catch (error) {
-    core.setFailed(`Integration failed: ${error instanceof Error ? error.message : String(error)}`);
+    core.error(`Task graph validation failed: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
   }
 }
