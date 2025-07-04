@@ -1,0 +1,23 @@
+{
+  "name": "taskmaster-scripts",
+  "version": "1.0.0",
+  "description": "Shared utility scripts for Taskmaster GitHub Actions",
+  "main": "index.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "taskmaster",
+    "github-actions",
+    "binary-download",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT"
+}
