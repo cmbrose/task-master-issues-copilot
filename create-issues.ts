@@ -284,11 +284,12 @@ async function addSubIssue(parentIssue: ParentIssue, subIssue: Issue) {
       sub_issue_id: subIssue.id,
     });
     parentIssue.subIssues.push(subIssue);
-    console.log(`Added sub-issue #${subIssue.number} to parent #${parentIssue.number}.`);
-  } catch (error) {
-    console.warn(`Failed to add sub-issue #${subIssue.number} to parent #${parentIssue.number}:`, error);
+    console.log(`✅ Added sub-issue #${subIssue.number} to parent #${parentIssue.number}.`);
+  } catch (error: any) {
+    console.warn(`⚠️  Failed to add sub-issue #${subIssue.number} to parent #${parentIssue.number}:`, error?.message || error);
     // Continue execution even if Sub-issues API fails
     // We'll track the relationship through YAML front-matter instead
+    console.log(`📝 Relationship tracked via YAML front-matter as fallback.`);
   }
 }
 
@@ -305,9 +306,9 @@ async function updateBlockedLabel(issue: Issue, shouldBeBlocked: boolean) {
         issue_number: issue.number,
         labels: ['blocked'],
       });
-      console.log(`Added 'blocked' label to issue #${issue.number}`);
-    } catch (error) {
-      console.warn(`Failed to add 'blocked' label to issue #${issue.number}:`, error);
+      console.log(`🚫 Added 'blocked' label to issue #${issue.number}`);
+    } catch (error: any) {
+      console.warn(`⚠️  Failed to add 'blocked' label to issue #${issue.number}:`, error?.message || error);
     }
   } else if (!shouldBeBlocked && hasBlockedLabel) {
     try {
@@ -317,9 +318,9 @@ async function updateBlockedLabel(issue: Issue, shouldBeBlocked: boolean) {
         issue_number: issue.number,
         name: 'blocked',
       });
-      console.log(`Removed 'blocked' label from issue #${issue.number}`);
-    } catch (error) {
-      console.warn(`Failed to remove 'blocked' label from issue #${issue.number}:`, error);
+      console.log(`✅ Removed 'blocked' label from issue #${issue.number}`);
+    } catch (error: any) {
+      console.warn(`⚠️  Failed to remove 'blocked' label from issue #${issue.number}:`, error?.message || error);
     }
   }
 }
@@ -349,9 +350,11 @@ async function getSubIssues(issue: Issue): Promise<ApiIssue[]> {
       repo: GITHUB_REPO!,
       issue_number: issue.number,
     });
+    console.log(`📋 Found ${subIssues.data.length} sub-issues for issue #${issue.number}`);
     return subIssues.data;
-  } catch (error) {
-    console.warn(`Failed to get sub-issues for issue #${issue.number}:`, error);
+  } catch (error: any) {
+    console.warn(`⚠️  Failed to get sub-issues for issue #${issue.number}:`, error?.message || error);
+    console.log(`📝 Continuing with YAML front-matter tracking only.`);
     // Return empty array if Sub-issues API is unavailable
     return [];
   }
@@ -446,7 +449,21 @@ async function main() {
     }
   }
 
-  console.log('All issues created and linked.');
+  console.log('\n🎉 All issues created and linked.');
+  
+  // Summary statistics
+  const totalIssues = Object.keys(idToIssue).length;
+  const blockedIssues = Object.values(idToIssue).filter(issue => 
+    issue.labels?.some(l => (typeof l === 'string' ? l : l.name) === 'blocked')
+  ).length;
+  
+  console.log(`\n📊 Summary:`);
+  console.log(`   • Total issues processed: ${totalIssues}`);
+  console.log(`   • Issues currently blocked: ${blockedIssues}`);
+  console.log(`   • Issues ready to work: ${totalIssues - blockedIssues}`);
+  console.log(`   • YAML front-matter: ✅ Enabled`);
+  console.log(`   • Dependency tracking: ✅ Active`);
+  console.log(`   • Sub-issues API: ${Object.values(idToIssue).some(i => (i as any).subIssues?.length) ? '✅ Working' : '⚠️  Limited/Disabled'}`);
 }
 
 main().catch(e => {

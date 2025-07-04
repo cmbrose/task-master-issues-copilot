@@ -294,11 +294,14 @@ function addSubIssue(parentIssue, subIssue) {
                 case 2:
                     _a.sent();
                     parentIssue.subIssues.push(subIssue);
-                    console.log("Added sub-issue #".concat(subIssue.number, " to parent #").concat(parentIssue.number, "."));
+                    console.log("\u2705 Added sub-issue #".concat(subIssue.number, " to parent #").concat(parentIssue.number, "."));
                     return [3 /*break*/, 4];
                 case 3:
                     error_1 = _a.sent();
-                    console.warn("Failed to add sub-issue #".concat(subIssue.number, " to parent #").concat(parentIssue.number, ":"), error_1);
+                    console.warn("\u26A0\uFE0F  Failed to add sub-issue #".concat(subIssue.number, " to parent #").concat(parentIssue.number, ":"), (error_1 === null || error_1 === void 0 ? void 0 : error_1.message) || error_1);
+                    // Continue execution even if Sub-issues API fails
+                    // We'll track the relationship through YAML front-matter instead
+                    console.log("\uD83D\uDCDD Relationship tracked via YAML front-matter as fallback.");
                     return [3 /*break*/, 4];
                 case 4: return [2 /*return*/];
             }
@@ -327,11 +330,11 @@ function updateBlockedLabel(issue, shouldBeBlocked) {
                         })];
                 case 2:
                     _b.sent();
-                    console.log("Added 'blocked' label to issue #".concat(issue.number));
+                    console.log("\uD83D\uDEAB Added 'blocked' label to issue #".concat(issue.number));
                     return [3 /*break*/, 4];
                 case 3:
                     error_2 = _b.sent();
-                    console.warn("Failed to add 'blocked' label to issue #".concat(issue.number, ":"), error_2);
+                    console.warn("\u26A0\uFE0F  Failed to add 'blocked' label to issue #".concat(issue.number, ":"), (error_2 === null || error_2 === void 0 ? void 0 : error_2.message) || error_2);
                     return [3 /*break*/, 4];
                 case 4: return [3 /*break*/, 9];
                 case 5:
@@ -347,11 +350,11 @@ function updateBlockedLabel(issue, shouldBeBlocked) {
                         })];
                 case 7:
                     _b.sent();
-                    console.log("Removed 'blocked' label from issue #".concat(issue.number));
+                    console.log("\u2705 Removed 'blocked' label from issue #".concat(issue.number));
                     return [3 /*break*/, 9];
                 case 8:
                     error_3 = _b.sent();
-                    console.warn("Failed to remove 'blocked' label from issue #".concat(issue.number, ":"), error_3);
+                    console.warn("\u26A0\uFE0F  Failed to remove 'blocked' label from issue #".concat(issue.number, ":"), (error_3 === null || error_3 === void 0 ? void 0 : error_3.message) || error_3);
                     return [3 /*break*/, 9];
                 case 9: return [2 /*return*/];
             }
@@ -386,10 +389,12 @@ function getSubIssues(issue) {
                         })];
                 case 1:
                     subIssues = _a.sent();
+                    console.log("\uD83D\uDCCB Found ".concat(subIssues.data.length, " sub-issues for issue #").concat(issue.number));
                     return [2 /*return*/, subIssues.data];
                 case 2:
                     error_4 = _a.sent();
-                    console.warn("Failed to get sub-issues for issue #".concat(issue.number, ":"), error_4);
+                    console.warn("\u26A0\uFE0F  Failed to get sub-issues for issue #".concat(issue.number, ":"), (error_4 === null || error_4 === void 0 ? void 0 : error_4.message) || error_4);
+                    console.log("\uD83D\uDCDD Continuing with YAML front-matter tracking only.");
                     // Return empty array if Sub-issues API is unavailable
                     return [2 /*return*/, []];
                 case 3: return [2 /*return*/];
@@ -399,7 +404,7 @@ function getSubIssues(issue) {
 }
 function main() {
     return __awaiter(this, void 0, void 0, function () {
-        var raw, data, tasks, idToIssue, _loop_1, _i, tasks_1, task, _loop_2, _a, tasks_2, task;
+        var raw, data, tasks, idToIssue, _loop_1, _i, tasks_1, task, _loop_2, _a, tasks_2, task, totalIssues, blockedIssues;
         var _b, _c, _d, _e, _f;
         return __generator(this, function (_g) {
             switch (_g.label) {
@@ -546,7 +551,16 @@ function main() {
                     _a++;
                     return [3 /*break*/, 5];
                 case 8:
-                    console.log('All issues created and linked.');
+                    console.log('\n🎉 All issues created and linked.');
+                    totalIssues = Object.keys(idToIssue).length;
+                    blockedIssues = Object.values(idToIssue).filter(function (issue) { var _a; return (_a = issue.labels) === null || _a === void 0 ? void 0 : _a.some(function (l) { return (typeof l === 'string' ? l : l.name) === 'blocked'; }); }).length;
+                    console.log("\n\uD83D\uDCCA Summary:");
+                    console.log("   \u2022 Total issues processed: ".concat(totalIssues));
+                    console.log("   \u2022 Issues currently blocked: ".concat(blockedIssues));
+                    console.log("   \u2022 Issues ready to work: ".concat(totalIssues - blockedIssues));
+                    console.log("   \u2022 YAML front-matter: \u2705 Enabled");
+                    console.log("   \u2022 Dependency tracking: \u2705 Active");
+                    console.log("   \u2022 Sub-issues API: ".concat(Object.values(idToIssue).some(function (i) { var _a; return (_a = i.subIssues) === null || _a === void 0 ? void 0 : _a.length; }) ? '✅ Working' : '⚠️  Limited/Disabled'));
                     return [2 /*return*/];
             }
         });
