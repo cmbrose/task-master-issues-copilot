@@ -7,6 +7,9 @@ This module provides functionality for downloading and managing CLI binaries in 
 - **Multi-platform support**: Automatic detection and support for Linux, Windows, and macOS with x64/arm64 architectures
 - **Version pinning**: Pin specific versions of binaries with intelligent storage management
 - **Download management**: Handle HTTP/HTTPS downloads with redirect support and proper error handling
+- **Checksum validation**: Support for SHA256 and SHA512 checksum verification against known good values
+- **Secure checksum retrieval**: Retrieve checksums from remote sources with proper validation
+- **Checksum mismatch handling**: Automatic retry and error reporting for corrupted downloads
 - **Storage management**: Organized binary storage with cleanup utilities
 - **GitHub Actions integration**: Seamless integration with GitHub Actions environment
 
@@ -44,6 +47,42 @@ const binaryInfo = await downloadBinary({
 });
 
 console.log(`Binary ready at: ${binaryInfo.binaryPath}`);
+```
+
+### Checksum Validation
+
+```typescript
+import { downloadBinary, ChecksumOptions } from '@scripts/index';
+
+// Direct checksum validation
+const binaryInfo = await downloadBinary({
+  baseUrl: 'https://github.com/owner/repo/releases/download',
+  version: '1.0.0',
+  storageDir: './bin',
+  checksum: {
+    value: 'abc123...', // SHA256 or SHA512 hash
+    algorithm: 'sha256'  // or 'sha512'
+  }
+});
+
+console.log(`Binary verified: ${binaryInfo.checksumVerified}`);
+```
+
+### Remote Checksum Validation
+
+```typescript
+// Retrieve checksum from remote URL
+const binaryInfo = await downloadBinary({
+  baseUrl: 'https://github.com/owner/repo/releases/download',
+  version: '1.0.0',
+  storageDir: './bin',
+  checksum: {
+    url: 'https://github.com/owner/repo/releases/download/v1.0.0/checksums.txt',
+    algorithm: 'sha256'
+  }
+});
+
+console.log(`Binary verified against remote checksum: ${binaryInfo.checksumVerified}`);
 ```
 
 ### GitHub Actions Integration
@@ -109,7 +148,7 @@ The module provides comprehensive error handling for:
 
 This module provides the foundation for:
 
-- **Issue #221 (Checksum validation)**: The `BinaryInfo` interface and download flow are designed to support checksum validation
+- **Issue #221 (Checksum validation)**: ✅ **COMPLETED** - Full checksum validation with SHA256/SHA512 support, remote checksum retrieval, and secure verification
 - **Issue #222 (Wrapper scripts)**: The binary path management enables wrapper script generation
 
 ## Platform Support
@@ -124,15 +163,19 @@ This module provides the foundation for:
 
 Full TypeScript support with exported interfaces:
 
-- `BinaryDownloadOptions`: Configuration for downloads
-- `BinaryInfo`: Information about downloaded binaries
+- `BinaryDownloadOptions`: Configuration for downloads with optional checksum validation
+- `BinaryInfo`: Information about downloaded binaries including checksum verification status
+- `ChecksumOptions`: Configuration for checksum validation (direct value or remote URL)
 - `PlatformInfo`: Platform detection results
 
 ## Future Enhancements
 
 Prepared for future enhancements in dependent issues:
 
-- **Checksum validation** (Issue #221): Interfaces ready for hash verification
 - **Wrapper scripts** (Issue #222): Binary paths and permissions handled
 - **Caching optimizations**: Storage management supports efficient caching
 - **Proxy support**: Download function can be extended for proxy support
+
+## Completed Enhancements
+
+- **Checksum validation** (Issue #221): ✅ Implemented with SHA256/SHA512 support and secure validation
