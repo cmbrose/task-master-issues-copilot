@@ -7,11 +7,14 @@
         "start": "ts-node create-issues.ts",
         "build": "tsc create-issues.ts",
         "lint": "tsc --noEmit",
+        "demo:issue-parser": "npx ts-node demo/issue-parser-demo.ts",
+        "demo:enhanced-management": "npx ts-node demo/enhanced-issue-management.ts",
         "test:triggers": "./test/test-triggers.sh",
         "test:labels": "./test/test-label-hierarchy.sh",
         "test:generate": "./test/test-generate-workflow.sh",
         "test:issue-creation": "./test/test-issue-creation.sh",
-        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && ./test/test-issue-creation.sh"
+        "test:yaml-parser": "./test/test-yaml-parser.sh",
+        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && ./test/test-issue-creation.sh && ./test/test-yaml-parser.sh"
     },
     "dependencies": {
         "@actions/core": "^1.10.1",
@@ -21,6 +24,7 @@
         "js-yaml": "^4.1.0"
     },
     "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
         "@types/node": "^20.0.0",
         "ts-node": "^10.0.0",
         "typescript": "^5.0.0"

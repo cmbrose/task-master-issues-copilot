@@ -81,6 +81,26 @@ outputs:
     description: 'Whether task-graph.json was successfully generated (true/false)'
   issues-created:
     description: 'Number of issues created or updated'
+  artifact-id:
+    description: 'ID of the uploaded task graph artifact'
+  artifact-name:
+    description: 'Name of the uploaded task graph artifact'
+  artifact-size:
+    description: 'Size of the uploaded artifact in bytes'
+  metadata-prd-version:
+    description: 'PRD version from the uploaded artifact metadata'
+  metadata-generation-timestamp:
+    description: 'Generation timestamp from the uploaded artifact metadata'
+  metadata-complexity-threshold:
+    description: 'Complexity threshold from the uploaded artifact metadata'
+  metadata-max-depth:
+    description: 'Max depth from the uploaded artifact metadata'
+  metadata-total-tasks:
+    description: 'Total tasks count from the uploaded artifact metadata'
+  metadata-leaf-tasks-count:
+    description: 'Leaf tasks count from the uploaded artifact metadata'
+  metadata-task-hierarchy-depth:
+    description: 'Task hierarchy depth from the uploaded artifact metadata'
 
 runs:
   using: 'composite'

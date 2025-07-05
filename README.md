@@ -58,6 +58,8 @@ This repository provides GitHub Actions that automatically generate hierarchical
    on:
      push:
        paths: ['docs/**.prd.md']
+     pull_request:
+       paths: ['docs/**.prd.md']
      issue_comment:
        types: [created]
      issues:
@@ -66,6 +68,7 @@ This repository provides GitHub Actions that automatically generate hierarchical
    permissions:
      issues: write
      contents: read
+     pull-requests: write
 
    jobs:
      taskmaster:
@@ -215,6 +218,8 @@ name: Generate Tasks
 on:
   push:
     paths: ['docs/**.prd.md']
+  pull_request:
+    paths: ['docs/**.prd.md']
 
 jobs:
   generate:
@@ -228,6 +233,11 @@ jobs:
           prd-path-glob: 'docs/**.prd.md'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
+
+**Key Features:**
+- **Push Events**: Creates and updates issues normally
+- **Pull Request Events**: Runs in dry-run mode for preview/analysis
+- **Configurable**: Use `prd-path-glob` to customize which files trigger the workflow
 
 **Repository Checkout:** The action automatically handles repository checkout. For manual control:
 

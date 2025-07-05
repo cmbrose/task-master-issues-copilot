@@ -62,6 +62,13 @@ on:
       - main
       - master
 
+  # Pull request trigger for dry-run mode
+  pull_request:
+    paths:
+      - 'docs/**.prd.md'
+      - 'docs/**/*.prd.md'
+    types: [opened, synchronize, reopened]
+
   # Trigger on issue comments for breakdown commands
   issue_comment:
     types: [created]
@@ -80,7 +87,7 @@ on:
 permissions:
   issues: write
   contents: read
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   # Input validation job
@@ -141,6 +148,7 @@ jobs:
     outputs:
       action-mode: ${{ steps.mode.outputs.action-mode }}
       scan-mode: ${{ steps.mode.outputs.scan-mode }}
+      dry-run: ${{ steps.mode.outputs.dry-run }}
     steps:
       - name: Determine Action Mode
         id: mode
@@ -149,26 +157,37 @@ jobs:
             "workflow_dispatch")
               echo "action-mode=${{ inputs.action-mode }}" >> $GITHUB_OUTPUT
               echo "scan-mode=${{ inputs.scan-mode }}" >> $GITHUB_OUTPUT
+              echo "dry-run=false" >> $GITHUB_OUTPUT
               ;;
             "push")
               echo "action-mode=generate" >> $GITHUB_OUTPUT
               echo "scan-mode=webhook" >> $GITHUB_OUTPUT
+              echo "dry-run=false" >> $GITHUB_OUTPUT
+              ;;
+            "pull_request")
+              echo "action-mode=generate" >> $GITHUB_OUTPUT
+              echo "scan-mode=webhook" >> $GITHUB_OUTPUT
+              echo "dry-run=true" >> $GITHUB_OUTPUT
               ;;
             "issue_comment")
               echo "action-mode=breakdown" >> $GITHUB_OUTPUT
               echo "scan-mode=webhook" >> $GITHUB_OUTPUT
+              echo "dry-run=false" >> $GITHUB_OUTPUT
               ;;
             "issues")
               echo "action-mode=watcher" >> $GITHUB_OUTPUT
               echo "scan-mode=webhook" >> $GITHUB_OUTPUT
+              echo "dry-run=false" >> $GITHUB_OUTPUT
               ;;
             "schedule")
               echo "action-mode=watcher" >> $GITHUB_OUTPUT
               echo "scan-mode=full" >> $GITHUB_OUTPUT
+              echo "dry-run=false" >> $GITHUB_OUTPUT
               ;;
             *)
               echo "action-mode=full" >> $GITHUB_OUTPUT
               echo "scan-mode=webhook" >> $GITHUB_OUTPUT
+              echo "dry-run=false" >> $GITHUB_OUTPUT
               ;;
           esac
 
@@ -212,6 +231,7 @@ jobs:
           echo "🚀 Taskmaster triggered by: ${{ github.event_name }}"
           echo "📋 Action mode: ${{ needs.determine-mode.outputs.action-mode }}"
           echo "🔍 Scan mode: ${{ needs.determine-mode.outputs.scan-mode }}"
+          echo "🏃 Dry-run mode: ${{ needs.determine-mode.outputs.dry-run }}"
           
           case "${{ github.event_name }}" in
             "workflow_dispatch")
@@ -227,6 +247,13 @@ jobs:
             "push")
               echo "📝 PRD files changed in commit: ${{ github.sha }}"
               echo "👤 Committed by: ${{ github.event.head_commit.author.name }}"
+              ;;
+            "pull_request")
+              echo "🔀 Pull request #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}"
+              echo "👤 Opened by: ${{ github.event.pull_request.user.login }}"
+              echo "📄 Base branch: ${{ github.event.pull_request.base.ref }}"
+              echo "📄 Head branch: ${{ github.event.pull_request.head.ref }}"
+              echo "🎯 Running in DRY-RUN mode - no issues will be created"
               ;;
             "issue_comment")
               echo "💬 Comment on issue #${{ github.event.issue.number }}"
@@ -256,6 +283,13 @@ jobs:
           taskmaster-version: ${{ github.event_name == 'workflow_dispatch' && inputs.taskmaster-version || '1.0.0' }}
           force-download: ${{ github.event_name == 'workflow_dispatch' && inputs.force-download || false }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          TASKMASTER_DRY_RUN: ${{ needs.determine-mode.outputs.dry-run }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_PR_TITLE: ${{ github.event.pull_request.title }}
+          GITHUB_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          GITHUB_PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
 
       - name: Upload Task Graph Artifact
         if: steps.taskmaster.outputs.task-graph
@@ -272,7 +306,13 @@ jobs:
           echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Action Mode**: ${{ needs.determine-mode.outputs.action-mode }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Scan Mode**: ${{ needs.determine-mode.outputs.scan-mode }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry-run Mode**: ${{ needs.determine-mode.outputs.dry-run }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.determine-mode.outputs.dry-run }}" == "true" ]]; then
+            echo "🎯 **DRY-RUN MODE**: This execution analyzed PRD changes without creating or modifying issues." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
           
           if [[ -n "${{ steps.taskmaster.outputs.task-graph }}" ]]; then
             echo "- **Task Graph**: Generated and uploaded as artifact" >> $GITHUB_STEP_SUMMARY

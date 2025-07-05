@@ -7,7 +7,7 @@
 
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import { loadConfig, TaskmasterConfig } from '@scripts/index';
+import { loadConfig, TaskmasterConfig } from '../../../scripts/index';
 
 async function run(): Promise<void> {
   try {
