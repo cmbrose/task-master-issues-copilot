@@ -72,13 +72,14 @@ jobs:
         if: steps.merge.outcome == 'success' || steps.merge.outcome == 'failure'
         run: |
           PR_NUMBER="${{ steps.prinfo.outputs.pr_number }}"
-          echo -e "@copilot\n\n## :warning: Merge Conflicts Detected" > conflict_report.md
+          echo "## :warning: Merge Conflicts Detected" > conflict_report.md
           echo "The following files have merge conflicts in PR #$PR_NUMBER:" >> conflict_report.md
           while read file; do
-            echo -e '\n### $file\n```' >> conflict_report.md
+            echo '\n### $file\n\`\`\`' >> conflict_report.md
             awk '/<<<<<<< /, />>>>>>> /' "$file" >> conflict_report.md
-            echo -e '```' >> conflict_report.md
+            echo '\`\`\`' >> conflict_report.md
           done < conflict_files.txt
+          echo "cc @copilot" >> conflict_report.md
 
       - name: Post conflict comment to PR
         if: steps.merge.outcome == 'success' || steps.merge.outcome == 'failure'
