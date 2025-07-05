@@ -14,8 +14,9 @@
         "test:generate": "./test/test-generate-workflow.sh",
         "test:issue-creation": "./test/test-issue-creation.sh",
         "test:sub-issues-api": "npx ts-node test/test-sub-issues-api.ts",
+        "test:dependency-tracking": "npx ts-node test/test-dependency-tracking.ts",
         "test:yaml-parser": "./test/test-yaml-parser.sh",
-        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && npm run test:issue-creation && npm run test:yaml-parser && npm run test:sub-issues-api"
+        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && npm run test:issue-creation && npm run test:yaml-parser && npm run test:sub-issues-api && npm run test:dependency-tracking"
     },
     "dependencies": {
         "@actions/core": "^1.10.1",

@@ -157,7 +157,9 @@ class IssueDependencyTracker {
     // First pass: collect all issues and their dependencies
     for (const issue of issues) {
       const parsed = parseIssueBody(issue.body);
-      const dependencies = parsed.dependencies.map(dep => dep.issueNumber);
+      // Use YAML front-matter dependencies if available, otherwise fall back to Dependencies section
+      const dependencies = parsed.yamlFrontMatter.dependencies || 
+                          parsed.dependencies.map(dep => dep.issueNumber);
       
       graph.set(issue.number, {
         issue,
@@ -207,6 +209,125 @@ class IssueDependencyTracker {
     }
     
     return unblockable;
+  }
+
+  /**
+   * Detect cycles in the dependency graph
+   */
+  detectCycles(issues: GitHubIssue[]): Array<{ cycle: number[]; description: string }> {
+    const graph = this.buildDependencyGraph(issues);
+    const cycles: Array<{ cycle: number[]; description: string }> = [];
+    const visited = new Set<number>();
+    const recursionStack = new Set<number>();
+    const currentPath: number[] = [];
+
+    function dfs(issueNumber: number): boolean {
+      if (recursionStack.has(issueNumber)) {
+        // Found a cycle - extract the cycle from current path
+        const cycleStartIndex = currentPath.indexOf(issueNumber);
+        const cycle = currentPath.slice(cycleStartIndex);
+        cycle.push(issueNumber); // Close the cycle
+        
+        const issueNumbers = cycle.map(n => `#${n}`).join(' → ');
+        cycles.push({
+          cycle,
+          description: `Circular dependency detected: ${issueNumbers}`
+        });
+        return true;
+      }
+
+      if (visited.has(issueNumber)) {
+        return false;
+      }
+
+      visited.add(issueNumber);
+      recursionStack.add(issueNumber);
+      currentPath.push(issueNumber);
+
+      const node = graph.get(issueNumber);
+      if (node) {
+        for (const dependency of node.dependencies) {
+          if (dfs(dependency)) {
+            return true;
+          }
+        }
+      }
+
+      recursionStack.delete(issueNumber);
+      currentPath.pop();
+      return false;
+    }
+
+    // Check each node for cycles
+    for (const [issueNumber] of graph) {
+      if (!visited.has(issueNumber)) {
+        dfs(issueNumber);
+      }
+    }
+
+    return cycles;
+  }
+
+  /**
+   * Get dependency resolution order using topological sort
+   */
+  getDependencyResolutionOrder(issues: GitHubIssue[]): {
+    order: number[];
+    hasCycles: boolean;
+    cycles: Array<{ cycle: number[]; description: string }>;
+  } {
+    const graph = this.buildDependencyGraph(issues);
+    const cycles = this.detectCycles(issues);
+    
+    if (cycles.length > 0) {
+      return {
+        order: [],
+        hasCycles: true,
+        cycles
+      };
+    }
+
+    const inDegree = new Map<number, number>();
+    const result: number[] = [];
+    const queue: number[] = [];
+
+    // Initialize in-degree count for all nodes
+    for (const [issueNumber, node] of graph) {
+      inDegree.set(issueNumber, node.dependencies.length);
+    }
+
+    // Find all nodes with no incoming edges (no dependencies)
+    for (const [issueNumber, degree] of inDegree) {
+      if (degree === 0) {
+        queue.push(issueNumber);
+      }
+    }
+
+    // Process nodes in topological order
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      result.push(current);
+
+      const node = graph.get(current);
+      if (node) {
+        // Reduce in-degree for all dependents
+        for (const dependent of node.dependents) {
+          const currentInDegree = inDegree.get(dependent) || 0;
+          const newInDegree = currentInDegree - 1;
+          inDegree.set(dependent, newInDegree);
+
+          if (newInDegree === 0) {
+            queue.push(dependent);
+          }
+        }
+      }
+    }
+
+    return {
+      order: result,
+      hasCycles: false,
+      cycles: []
+    };
   }
 
   /**
@@ -366,7 +487,118 @@ Create REST API endpoints
   const unblockable = tracker.findUnblockableIssues(101, sampleIssues);
   console.log(`  If issue #101 is closed, it would unblock: ${unblockable.map(i => `#${i.number}`).join(', ') || 'No issues'}`);
 
+  console.log('\n🔍 Cycle Detection:');
+  const cycles = tracker.detectCycles(sampleIssues);
+  if (cycles.length === 0) {
+    console.log('  ✅ No dependency cycles detected');
+  } else {
+    cycles.forEach(cycle => {
+      console.log(`  🔄 ${cycle.description}`);
+    });
+  }
+
+  console.log('\n📊 Dependency Resolution Order:');
+  const resolutionOrder = tracker.getDependencyResolutionOrder(sampleIssues);
+  if (resolutionOrder.hasCycles) {
+    console.log('  ❌ Cannot determine order due to dependency cycles:');
+    resolutionOrder.cycles.forEach(cycle => {
+      console.log(`    ${cycle.description}`);
+    });
+  } else {
+    console.log(`  ✅ Optimal resolution order: ${resolutionOrder.order.map(n => `#${n}`).join(' → ')}`);
+  }
+
   console.log('\n✅ Integration demo completed');
+}
+
+/**
+ * Demo: Show cycle detection with circular dependencies
+ */
+function demonstrateCycleDetection(): void {
+  console.log('\n🔄 Cycle Detection Demo');
+  console.log('=' .repeat(40));
+
+  // Sample issues with circular dependencies
+  const cyclicIssues: GitHubIssue[] = [
+    {
+      number: 200,
+      title: '[A] Task A',
+      state: 'open',
+      labels: [],
+      body: `---
+id: 200
+dependencies: [202]
+---
+
+## Description
+Task A depends on Task C
+
+## Dependencies
+- [ ] #202 Task C`
+    },
+    {
+      number: 201,
+      title: '[B] Task B',
+      state: 'open',
+      labels: [],
+      body: `---
+id: 201
+dependencies: [200]
+---
+
+## Description
+Task B depends on Task A
+
+## Dependencies
+- [ ] #200 Task A`
+    },
+    {
+      number: 202,
+      title: '[C] Task C',
+      state: 'open',
+      labels: [],
+      body: `---
+id: 202
+dependencies: [201]
+---
+
+## Description
+Task C depends on Task B
+
+## Dependencies
+- [ ] #201 Task B`
+    }
+  ];
+
+  const tracker = new IssueDependencyTracker();
+
+  console.log('📋 Issues:');
+  cyclicIssues.forEach(issue => {
+    console.log(`  ${issue.title}`);
+  });
+
+  console.log('\n🔍 Cycle Detection:');
+  const cycles = tracker.detectCycles(cyclicIssues);
+  if (cycles.length === 0) {
+    console.log('  ✅ No dependency cycles detected');
+  } else {
+    cycles.forEach((cycle, index) => {
+      console.log(`  🔄 Cycle ${index + 1}: ${cycle.description}`);
+    });
+  }
+
+  console.log('\n📊 Dependency Resolution Order:');
+  const resolutionOrder = tracker.getDependencyResolutionOrder(cyclicIssues);
+  if (resolutionOrder.hasCycles) {
+    console.log('  ❌ Cannot determine order due to dependency cycles:');
+    resolutionOrder.cycles.forEach(cycle => {
+      console.log(`    ${cycle.description}`);
+    });
+  } else {
+    console.log(`  ✅ Optimal resolution order: ${resolutionOrder.order.map(n => `#${n}`).join(' → ')}`);
+  }
+
+  console.log('\n✅ Cycle detection demo completed');
 }
 
 /**
@@ -413,7 +645,8 @@ if (dependencies.some(dep => !dep.completed)) {
 // Run the integration demo
 if (require.main === module) {
   demonstrateIntegration();
+  demonstrateCycleDetection();
   showWorkflowIntegration();
 }
 
-export { EnhancedIssueAnalyzer, IssueDependencyTracker, demonstrateIntegration };
+export { EnhancedIssueAnalyzer, IssueDependencyTracker, demonstrateIntegration, demonstrateCycleDetection };
