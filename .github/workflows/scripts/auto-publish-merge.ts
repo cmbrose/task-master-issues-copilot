@@ -20,7 +20,7 @@ const octokit = new Octokit({ auth: mergeToken });
 async function processPR(prNum: number) {
   try {
     // Get PR details
-    const { data: pr } = await octokit.pulls.get({
+    let { data: pr } = await octokit.pulls.get({
       owner,
       repo,
       pull_number: prNum,
@@ -49,7 +49,19 @@ async function processPR(prNum: number) {
       console.log(`PR #${prNum}: PR is already published`);
     }
 
-    if (pr.mergeable) {
+    if (pr.mergeable === null) {
+        // It's recalculating from a recent merge, probably from this workflow. Wait a few seconds
+        console.log(`PR #${prNum}: unknown mergeable state, waiting for it to normalize`);
+        await new Promise((resolve) => setTimeout(resolve, 15000));
+        const res = await octokit.pulls.get({
+            owner,
+            repo,
+            pull_number: prNum,
+        });
+        pr = res.data;
+    }
+
+    if (pr.mergeable === true) {
         // Merge the PR
         await octokit.pulls.merge({
             owner,
@@ -58,7 +70,7 @@ async function processPR(prNum: number) {
             merge_method: "squash", // or 'merge' or 'rebase'
         });
         console.log(`PR #${prNum}: Merged PR`);
-    } else {
+    } else if (pr.mergeable === false) {
         // unassign cmbrose as a reviewer
         await octokit.pulls.removeRequestedReviewers({
             owner,
@@ -78,6 +90,8 @@ async function processPR(prNum: number) {
             },
         });
         console.log(`PR #${prNum}: Triggered copilot conflict workflow.`);
+    } else {
+        console.log(`PR #${prNum}: Mergeable state is still unknown, skipping to try again later`);
     }
   } catch (err) {
     console.error(`Error processing PR #${prNum}:`, err);
