@@ -433,6 +433,260 @@ export class EnhancedGitHubApi {
   }
 
   /**
+   * Get sub-issues for a given issue by parsing issue relationships
+   */
+  async getSubIssues(issueNumber: number): Promise<ApiIssue[]> {
+    return this.executeWithRetry(async () => {
+      // Get the parent issue to parse its body for sub-issue references
+      const parentIssue = await this.octokit.issues.get({
+        owner: this.config.owner,
+        repo: this.config.repo,
+        issue_number: issueNumber
+      });
+
+      const subIssueNumbers = this.parseSubIssuesFromBody(parentIssue.data.body || '');
+      
+      // Fetch each sub-issue
+      const subIssues: ApiIssue[] = [];
+      for (const subIssueNumber of subIssueNumbers) {
+        try {
+          const subIssue = await this.octokit.issues.get({
+            owner: this.config.owner,
+            repo: this.config.repo,
+            issue_number: subIssueNumber
+          });
+          subIssues.push(subIssue.data);
+        } catch (error) {
+          this.log(`Failed to fetch sub-issue #${subIssueNumber}: ${error}`);
+        }
+      }
+      
+      return subIssues;
+    }, 'get-sub-issues');
+  }
+
+  /**
+   * Parse sub-issue numbers from issue body content
+   */
+  private parseSubIssuesFromBody(body: string): number[] {
+    const subIssueNumbers: number[] = [];
+    
+    // Look for sub-issue references in various formats:
+    // - "## Subtasks" or "## Sub-issues" sections (markdown headers)
+    // - "- Required By:" or "## Required By" sections  
+    
+    const issueRefRegex = /#(\d+)/g;
+    const subtaskSectionRegex = /##\s*(?:Subtasks?|Sub-issues?|subtasks?|sub-issues?)\s*\n((?:\s*-\s*\[[\sx]\]\s*#\d+.*\n?)*)/gmi;
+    const requiredByRegex = /(?:##\s*(?:Required By|required by)|(?:^|\n)\s*-\s*\*\*Required By:\*\*|\n\s*Required By:)\s*\n((?:\s*-\s*\[[\sx]\]\s*#\d+.*\n?)*)/gmi;
+    
+    // Extract from subtask sections
+    let match;
+    while ((match = subtaskSectionRegex.exec(body)) !== null) {
+      const section = match[1];
+      let issueMatch;
+      while ((issueMatch = issueRefRegex.exec(section)) !== null) {
+        subIssueNumbers.push(parseInt(issueMatch[1]));
+      }
+      // Reset lastIndex for the inner regex
+      issueRefRegex.lastIndex = 0;
+    }
+    
+    // Reset lastIndex for the section regex
+    subtaskSectionRegex.lastIndex = 0;
+    
+    // Extract from required by sections  
+    while ((match = requiredByRegex.exec(body)) !== null) {
+      const section = match[1];
+      let issueMatch;
+      while ((issueMatch = issueRefRegex.exec(section)) !== null) {
+        subIssueNumbers.push(parseInt(issueMatch[1]));
+      }
+      // Reset lastIndex for the inner regex
+      issueRefRegex.lastIndex = 0;
+    }
+    
+    return Array.from(new Set(subIssueNumbers)); // Remove duplicates
+  }
+
+  /**
+   * Add a sub-issue relationship by updating issue bodies and metadata
+   */
+  async addSubIssue(parentIssueNumber: number, subIssueNumber: number): Promise<void> {
+    return this.executeWithRetry(async () => {
+      // Get both issues
+      const [parentIssue, subIssue] = await Promise.all([
+        this.octokit.issues.get({
+          owner: this.config.owner,
+          repo: this.config.repo,
+          issue_number: parentIssueNumber
+        }),
+        this.octokit.issues.get({
+          owner: this.config.owner,
+          repo: this.config.repo,
+          issue_number: subIssueNumber
+        })
+      ]);
+
+      // Update parent issue body to include sub-issue reference
+      const updatedParentBody = this.addSubIssueToBody(
+        parentIssue.data.body || '', 
+        subIssueNumber,
+        subIssue.data.state === 'closed'
+      );
+
+      // Update sub-issue body to reference parent
+      const updatedSubIssueBody = this.addParentReferenceToBody(
+        subIssue.data.body || '',
+        parentIssueNumber
+      );
+
+      // Update both issues
+      await Promise.all([
+        this.octokit.issues.update({
+          owner: this.config.owner,
+          repo: this.config.repo,
+          issue_number: parentIssueNumber,
+          body: updatedParentBody
+        }),
+        this.octokit.issues.update({
+          owner: this.config.owner,
+          repo: this.config.repo,
+          issue_number: subIssueNumber,
+          body: updatedSubIssueBody
+        })
+      ]);
+
+      this.log(`Added sub-issue relationship: #${parentIssueNumber} -> #${subIssueNumber}`);
+    }, 'add-sub-issue');
+  }
+
+  /**
+   * Add sub-issue reference to parent issue body
+   */
+  private addSubIssueToBody(body: string, subIssueNumber: number, isCompleted: boolean): string {
+    const checkbox = isCompleted ? '[x]' : '[ ]';
+    const newSubIssueEntry = `   - ${checkbox} #${subIssueNumber}`;
+    
+    // Look for existing subtasks section
+    const subtasksSectionRegex = /(## Subtasks\s*\n)((?:\s*-\s*\[[\sx]\]\s*#\d+.*\n?)*)/gmi;
+    const match = subtasksSectionRegex.exec(body);
+    
+    if (match) {
+      // Add to existing subtasks section
+      const existingEntries = match[2];
+      const updatedSection = `${match[1]}${existingEntries}${newSubIssueEntry}\n`;
+      return body.replace(subtasksSectionRegex, updatedSection);
+    } else {
+      // Add new subtasks section before Meta section or at the end
+      const metaSectionIndex = body.indexOf('## Meta');
+      if (metaSectionIndex !== -1) {
+        return body.slice(0, metaSectionIndex) + 
+               `## Subtasks\n${newSubIssueEntry}\n\n` + 
+               body.slice(metaSectionIndex);
+      } else {
+        return body + `\n## Subtasks\n${newSubIssueEntry}\n`;
+      }
+    }
+  }
+
+  /**
+   * Add parent reference to sub-issue body
+   */
+  private addParentReferenceToBody(body: string, parentIssueNumber: number): string {
+    // Check if parent reference already exists
+    if (body.includes(`**Parent Task:** #${parentIssueNumber}`)) {
+      return body;
+    }
+    
+    // Look for existing Meta section
+    const metaSectionRegex = /(## Meta\s*\n)/gmi;
+    const match = metaSectionRegex.exec(body);
+    
+    if (match) {
+      // Add parent reference in Meta section
+      const parentRef = `- **Parent Task:** #${parentIssueNumber}\n`;
+      return body.replace(metaSectionRegex, `${match[1]}${parentRef}`);
+    } else {
+      // Add new Meta section with parent reference
+      return body + `\n## Meta\n- **Parent Task:** #${parentIssueNumber}\n`;
+    }
+  }
+
+  /**
+   * Remove a sub-issue relationship
+   */
+  async removeSubIssue(parentIssueNumber: number, subIssueNumber: number): Promise<void> {
+    return this.executeWithRetry(async () => {
+      // Get both issues
+      const [parentIssue, subIssue] = await Promise.all([
+        this.octokit.issues.get({
+          owner: this.config.owner,
+          repo: this.config.repo,
+          issue_number: parentIssueNumber
+        }),
+        this.octokit.issues.get({
+          owner: this.config.owner,
+          repo: this.config.repo,
+          issue_number: subIssueNumber
+        })
+      ]);
+
+      // Remove sub-issue reference from parent
+      const updatedParentBody = this.removeSubIssueFromBody(
+        parentIssue.data.body || '',
+        subIssueNumber
+      );
+
+      // Remove parent reference from sub-issue
+      const updatedSubIssueBody = this.removeParentReferenceFromBody(
+        subIssue.data.body || '',
+        parentIssueNumber
+      );
+
+      // Update both issues
+      await Promise.all([
+        this.octokit.issues.update({
+          owner: this.config.owner,
+          repo: this.config.repo,
+          issue_number: parentIssueNumber,
+          body: updatedParentBody
+        }),
+        this.octokit.issues.update({
+          owner: this.config.owner,
+          repo: this.config.repo,
+          issue_number: subIssueNumber,
+          body: updatedSubIssueBody
+        })
+      ]);
+
+      this.log(`Removed sub-issue relationship: #${parentIssueNumber} -> #${subIssueNumber}`);
+    }, 'remove-sub-issue');
+  }
+
+  /**
+   * Remove sub-issue reference from parent issue body
+   */
+  private removeSubIssueFromBody(body: string, subIssueNumber: number): string {
+    // Remove lines that reference the specific sub-issue
+    const lines = body.split('\n');
+    const filteredLines = lines.filter(line => 
+      !line.includes(`#${subIssueNumber}`) || 
+      !line.match(/^\s*-\s*\[[\sx]\]\s*#\d+/)
+    );
+    return filteredLines.join('\n');
+  }
+
+  /**
+   * Remove parent reference from sub-issue body
+   */
+  private removeParentReferenceFromBody(body: string, parentIssueNumber: number): string {
+    return body.replace(
+      new RegExp(`- \\*\\*Parent Task:\\*\\* #${parentIssueNumber}\\n?`, 'g'),
+      ''
+    );
+  }
+
+  /**
    * Get current rate limit status
    */
   async getRateLimitStatus(): Promise<RateLimitInfo> {
