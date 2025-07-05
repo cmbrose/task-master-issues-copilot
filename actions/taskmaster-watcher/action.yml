@@ -77,15 +77,9 @@ runs:
       with:
         node-version: '20'
     
-    - name: Install dependencies
-      run: npm install
-      shell: bash
-      working-directory: ${{ github.action_path }}
-    
     - name: Run Taskmaster Watcher
-      run: npx ts-node src/main.ts
+      run: node ${{ github.action_path }}/dist/index.js
       shell: bash
-      working-directory: ${{ github.action_path }}
       env:
         INPUT_GITHUB-TOKEN: ${{ inputs.github-token }}
         INPUT_SCAN-MODE: ${{ inputs.scan-mode }}

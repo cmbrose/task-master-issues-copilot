@@ -39,9 +39,20 @@ Monitors issue changes and automatically updates dependency status.
 
 **Triggers:** Issue closed events and scheduled cron jobs
 **Key Features:**
-- Removes "blocked" labels when dependencies are resolved
+- Automatically removes "blocked" labels when dependencies are resolved
+- Adds "ready" labels when all dependencies are completed  
 - Supports both webhook and full scan modes
 - Maintains dependency chain integrity
+- Comprehensive error handling and logging
+
+**Operation Modes:**
+- `webhook` mode: Processes single issue closed events for real-time updates
+- `full` mode: Scans all open issues for batch dependency status updates
+
+**Label Management:**
+- `blocked` - Issue has unresolved dependencies
+- `blocked-by:N` - Shows count of blocking dependencies
+- `ready` - All dependencies resolved, issue ready for work
 
 ## Directory Structure
 
