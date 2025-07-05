@@ -41,7 +41,9 @@ jobs:
           echo "head_branch=$HEAD_BRANCH" >> $GITHUB_OUTPUT
           echo "base_branch=$BASE_BRANCH" >> $GITHUB_OUTPUT
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-
+        env:
+          GH_TOKEN: ${{ github.token }}
+          
       - name: Fetch PR and base branches
         run: |
           git fetch origin "${{ steps.prinfo.outputs.head_branch }}"
@@ -77,7 +79,7 @@ jobs:
       - name: Post conflict comment to PR
         if: steps.merge.outcome == 'success' || steps.merge.outcome == 'failure'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUMBER="${{ steps.prinfo.outputs.pr_number }}"
           gh pr comment $PR_NUMBER --body-file conflict_report.md
