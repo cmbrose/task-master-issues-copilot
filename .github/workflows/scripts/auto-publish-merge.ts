@@ -46,14 +46,36 @@ async function processPR(prNum: number) {
       console.log(`PR #${prNum}: PR is already published`);
     }
 
-    // Merge the PR
-    await octokit.pulls.merge({
-      owner,
-      repo,
-      pull_number: prNum,
-      merge_method: "squash", // or 'merge' or 'rebase'
-    });
-    console.log(`PR #${prNum}: Merged PR`);
+    if (pr.mergeable) {
+        // Merge the PR
+        await octokit.pulls.merge({
+            owner,
+            repo,
+            pull_number: prNum,
+            merge_method: "squash", // or 'merge' or 'rebase'
+        });
+        console.log(`PR #${prNum}: Merged PR`);
+    } else {
+        // unassign cmbrose as a reviewer
+        await octokit.pulls.removeRequestedReviewers({
+            owner,
+            repo,
+            pull_number: prNum,
+            reviewers: ["cmbrose"],
+        });
+        console.log(`PR #${prNum}: Unassigned cmbrose as a reviewer due to merge conflict.`);
+
+        // kick off a workflow to tell copilot to handle the conflict
+        await octokit.repos.createDispatchEvent({
+            owner,
+            repo,
+            event_type: "copilot_conflict",
+            client_payload: {
+                pr_number: prNum,
+            },
+        });
+        console.log(`PR #${prNum}: Triggered copilot conflict workflow.`);
+    }
   } catch (err) {
     console.error(`Error processing PR #${prNum}:`, err);
   }

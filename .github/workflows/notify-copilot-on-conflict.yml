@@ -1,0 +1,86 @@
+name: Notify Copilot on PR Conflict
+
+on:
+  repository_dispatch:
+    types: [copilot_conflict]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to check for conflicts (required)'
+        required: true
+        type: string
+
+jobs:
+  notify-copilot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up GitHub CLI
+        uses: cli/cli-action@v2
+
+      - name: Get PR info
+        id: prinfo
+        run: |
+          # Use workflow_dispatch input if present, else use repository_dispatch payload
+          if [ -n "${{ github.event.inputs.pr_number }}" ]; then
+            PR_NUMBER="${{ github.event.inputs.pr_number }}"
+          else
+            PR_NUMBER="${{ github.event.client_payload.pr_number }}"
+          fi
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No PR number provided."
+            exit 1
+          fi
+          gh pr view $PR_NUMBER --json headRefName,baseRefName -q '.headRefName + "," + .baseRefName' > pr_branches.txt
+          HEAD_BRANCH=$(cut -d, -f1 pr_branches.txt)
+          BASE_BRANCH=$(cut -d, -f2 pr_branches.txt)
+          echo "head_branch=$HEAD_BRANCH" >> $GITHUB_OUTPUT
+          echo "base_branch=$BASE_BRANCH" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Fetch PR and base branches
+        run: |
+          git fetch origin "${{ steps.prinfo.outputs.head_branch }}"
+          git fetch origin "${{ steps.prinfo.outputs.base_branch }}"
+
+      - name: Checkout base branch
+        run: |
+          git checkout "origin/${{ steps.prinfo.outputs.base_branch }}" -b base-branch
+
+      - name: Attempt merge and collect conflicts
+        id: merge
+        continue-on-error: true
+        run: |
+          git merge "origin/${{ steps.prinfo.outputs.head_branch }}" || true
+          CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
+          if [ -z "$CONFLICT_FILES" ]; then
+            echo "No merge conflicts detected."
+            exit 0
+          fi
+          echo "$CONFLICT_FILES" > conflict_files.txt
+
+      - name: Extract conflict blocks
+        if: steps.merge.outcome == 'success' || steps.merge.outcome == 'failure'
+        run: |
+          PR_NUMBER="${{ steps.prinfo.outputs.pr_number }}"
+          echo "## :warning: Merge Conflicts Detected" > conflict_report.md
+          echo "The following files have merge conflicts in PR #$PR_NUMBER:" >> conflict_report.md
+          while read file; do
+            echo "\n### $file" >> conflict_report.md
+            awk '/<<<<<<< /, />>>>>>> /' "$file" >> conflict_report.md
+          done < conflict_files.txt
+
+      - name: Post conflict comment to PR
+        if: steps.merge.outcome == 'success' || steps.merge.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ steps.prinfo.outputs.pr_number }}"
+          gh pr comment $PR_NUMBER --body-file conflict_report.md
