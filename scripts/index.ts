@@ -118,3 +118,20 @@ export {
   type RateLimitInfo,
   type ApiIssue
 } from './github-api';
+
+// Export issue parsing utilities
+export {
+  parseYamlFrontMatter,
+  parseMetadata,
+  parseDependencies,
+  parseRequiredBy,
+  parseContentSections,
+  parseIssueBody,
+  hasYamlFrontMatter,
+  extractTaskId,
+  extractParentId,
+  type ParsedYamlFrontMatter,
+  type ParsedMetadata,
+  type ParsedDependency,
+  type ParsedIssueData
+} from './issue-parser';
