@@ -9,7 +9,7 @@ import * as core from '@actions/core';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
-import { downloadBinary, BinaryDownloadOptions, BinaryInfo, TaskmasterConfig, loadFromEnvironment } from '@scripts/index';
+import { downloadBinary, BinaryDownloadOptions, BinaryInfo, TaskmasterConfig, loadFromEnvironment } from '../../../scripts/index';
 
 /**
  * Configuration for Taskmaster CLI setup
