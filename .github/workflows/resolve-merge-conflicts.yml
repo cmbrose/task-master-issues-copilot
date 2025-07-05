@@ -43,6 +43,13 @@ jobs:
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ github.token }}
+
+      - name: Install tools
+        run: |
+          pip install --quiet llm
+          llm install llm-github-models
+          sudo apt-get update -qq
+          sudo apt-get install -yqq jq
           
       - name: Fetch PR and base branches
         run: |
@@ -78,7 +85,7 @@ jobs:
               --fragment $file \
               --schema "success bool" \
               --system "You are a merge conflict resolver. Use the provided tools to resolve the conflict. Report success or failure" \
-              "Resolve conflicts in $file"
+              "Resolve conflicts in $file" \
               | jq '.success')
 
             if [ "$result" != "true" ]; then
