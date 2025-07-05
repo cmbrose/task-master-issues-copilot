@@ -10,6 +10,10 @@ on:
         required: false
         type: string
 
+permissions:
+  issues: write
+  contents: read
+
 jobs:
   assign-copilot:
     runs-on: ubuntu-latest
