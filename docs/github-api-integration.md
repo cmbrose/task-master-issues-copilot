@@ -139,6 +139,28 @@ const issues = await Promise.all(
 await githubApi.waitForCompletion();
 ```
 
+### Sub-Issues API Integration
+
+Enhanced support for issue hierarchy management:
+
+```typescript
+// Find sub-issues for a parent issue
+const subIssues = await githubApi.findSubIssues(parentIssue);
+
+// Establish parent-child relationship
+await githubApi.addSubIssueRelationship(parentIssue, childIssue);
+
+// Remove sub-issue relationship
+await githubApi.removeSubIssueRelationship(parentIssue, childIssue);
+```
+
+**Sub-Issues Features:**
+- Multiple detection strategies (YAML front-matter, labels, issue references)
+- Automatic parent reference management in issue descriptions
+- Label-based relationship tracking (`parent:123`)
+- Integration with GitHub search API for relationship discovery
+- Comprehensive error handling with fallback mechanisms
+
 ### Error Handling
 
 ```typescript

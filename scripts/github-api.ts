@@ -457,6 +457,185 @@ export class EnhancedGitHubApi {
   }
 
   /**
+   * Find sub-issues for a parent issue using GitHub search API and issue references
+   * Since GitHub doesn't have a native sub-issues API, we search for issues that reference the parent
+   */
+  async findSubIssues(parentIssue: ApiIssue): Promise<ApiIssue[]> {
+    return this.executeWithRetry(async () => {
+      const subIssues: ApiIssue[] = [];
+      
+      // Strategy 1: Search for issues that reference the parent issue
+      const searchQuery = `repo:${this.config.owner}/${this.config.repo} #${parentIssue.number}`;
+      
+      try {
+        const searchResult = await this.octokit.search.issuesAndPullRequests({
+          q: searchQuery,
+          per_page: 100
+        });
+
+        // Filter to only include issues (not PRs) that are likely sub-issues
+        for (const issue of searchResult.data.items) {
+          if (issue.pull_request) continue; // Skip pull requests
+          if (issue.number === parentIssue.number) continue; // Skip self-reference
+          
+          // Check if this issue references the parent in a way that suggests it's a sub-issue
+          if (this.isSubIssueReference(issue, parentIssue)) {
+            subIssues.push(issue as ApiIssue);
+          }
+        }
+      } catch (error) {
+        this.log(`Failed to search for sub-issues: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      // Strategy 2: Look for issues with specific labels indicating parent relationship
+      try {
+        const labelSearchQuery = `repo:${this.config.owner}/${this.config.repo} label:parent:${parentIssue.number}`;
+        const labelSearchResult = await this.octokit.search.issuesAndPullRequests({
+          q: labelSearchQuery,
+          per_page: 100
+        });
+
+        for (const issue of labelSearchResult.data.items) {
+          if (issue.pull_request) continue;
+          if (!subIssues.some(si => si.number === issue.number)) {
+            subIssues.push(issue as ApiIssue);
+          }
+        }
+      } catch (error) {
+        this.log(`Failed to search for sub-issues by label: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      return subIssues;
+    }, 'find-sub-issues');
+  }
+
+  /**
+   * Add a sub-issue relationship by updating issue metadata and references
+   * Since GitHub doesn't have native sub-issues API, we use issue descriptions and labels
+   */
+  async addSubIssueRelationship(parentIssue: ApiIssue, subIssue: ApiIssue): Promise<void> {
+    return this.executeWithRetry(async () => {
+      // Add parent reference label to sub-issue
+      const subIssueLabels = Array.isArray(subIssue.labels) 
+        ? subIssue.labels.map(label => typeof label === 'string' ? label : label.name).filter(Boolean)
+        : [];
+      
+      const parentLabel = `parent:${parentIssue.number}`;
+      if (!subIssueLabels.includes(parentLabel)) {
+        subIssueLabels.push(parentLabel);
+        
+        await this.updateIssue(subIssue.number, {
+          labels: subIssueLabels
+        });
+      }
+
+      // Update sub-issue description to include parent reference if not already present
+      if (subIssue.body && !subIssue.body.includes(`#${parentIssue.number}`)) {
+        const updatedBody = this.addParentReferenceToBody(subIssue.body, parentIssue.number);
+        await this.updateIssue(subIssue.number, {
+          body: updatedBody
+        });
+      }
+
+      this.log(`Established sub-issue relationship: #${parentIssue.number} -> #${subIssue.number}`);
+    }, 'add-sub-issue');
+  }
+
+  /**
+   * Remove a sub-issue relationship
+   */
+  async removeSubIssueRelationship(parentIssue: ApiIssue, subIssue: ApiIssue): Promise<void> {
+    return this.executeWithRetry(async () => {
+      // Remove parent reference label from sub-issue
+      const subIssueLabels = Array.isArray(subIssue.labels) 
+        ? subIssue.labels.map(label => typeof label === 'string' ? label : label.name).filter(Boolean)
+        : [];
+      
+      const parentLabel = `parent:${parentIssue.number}`;
+      const updatedLabels = subIssueLabels.filter(label => label !== parentLabel);
+      
+      if (updatedLabels.length !== subIssueLabels.length) {
+        await this.updateIssue(subIssue.number, {
+          labels: updatedLabels
+        });
+      }
+
+      this.log(`Removed sub-issue relationship: #${parentIssue.number} -> #${subIssue.number}`);
+    }, 'remove-sub-issue');
+  }
+
+  /**
+   * Check if an issue appears to be a sub-issue of the parent based on content analysis
+   */
+  private isSubIssueReference(candidateIssue: any, parentIssue: ApiIssue): boolean {
+    const body = candidateIssue.body || '';
+    const title = candidateIssue.title || '';
+    
+    // Check for explicit parent reference in YAML front-matter
+    const yamlMatch = body.match(/^---\s*\n([\s\S]*?)\n---/);
+    if (yamlMatch) {
+      const yamlContent = yamlMatch[1];
+      if (yamlContent.includes(`parent: ${parentIssue.number}`)) {
+        return true;
+      }
+    }
+    
+    // Check for labels indicating parent relationship
+    const labels = Array.isArray(candidateIssue.labels) 
+      ? candidateIssue.labels.map((label: any) => typeof label === 'string' ? label : label.name)
+      : [];
+    
+    if (labels.includes(`parent:${parentIssue.number}`)) {
+      return true;
+    }
+    
+    // Check for sub-task keywords with parent reference
+    const subTaskPattern = new RegExp(`sub.*task.*#${parentIssue.number}|#${parentIssue.number}.*sub.*task`, 'i');
+    if (subTaskPattern.test(body) || subTaskPattern.test(title)) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Add parent reference to issue body in a structured way
+   */
+  private addParentReferenceToBody(body: string, parentNumber: number): string {
+    // Check if there's already a Dependencies section
+    if (body.includes('## Dependencies')) {
+      // Add to existing dependencies section
+      const dependenciesMatch = body.match(/(## Dependencies\s*\n)([\s\S]*?)(\n##|$)/);
+      if (dependenciesMatch) {
+        const prefix = dependenciesMatch[1];
+        const dependenciesContent = dependenciesMatch[2];
+        const suffix = dependenciesMatch[3] || '';
+        
+        const parentRef = `- [ ] Parent: #${parentNumber}\n`;
+        if (!dependenciesContent.includes(`#${parentNumber}`)) {
+          const updatedDependencies = parentRef + dependenciesContent;
+          return body.replace(dependenciesMatch[0], prefix + updatedDependencies + suffix);
+        }
+      }
+    } else {
+      // Add a new Dependencies section
+      const yamlMatch = body.match(/^(---\s*\n[\s\S]*?\n---\s*\n)/);
+      if (yamlMatch) {
+        // Insert after YAML front-matter
+        const afterYaml = body.substring(yamlMatch[1].length);
+        const dependenciesSection = `\n## Dependencies\n\n- [ ] Parent: #${parentNumber}\n\n`;
+        return yamlMatch[1] + dependenciesSection + afterYaml;
+      } else {
+        // Insert at the beginning
+        const dependenciesSection = `## Dependencies\n\n- [ ] Parent: #${parentNumber}\n\n`;
+        return dependenciesSection + body;
+      }
+    }
+    
+    return body;
+  }
+
+  /**
    * Wait for all pending requests to complete
    */
   async waitForCompletion(): Promise<void> {

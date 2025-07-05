@@ -297,15 +297,8 @@ async function createOrGetIssue(githubApi: EnhancedGitHubApi, task: Task, parent
  */
 async function addSubIssue(githubApi: EnhancedGitHubApi, parentIssue: ParentIssue, subIssue: Issue): Promise<void> {
   try {
-    // Try to add the sub-issue using GitHub's sub-issue API via the octokit client
-    await githubApi.executeWithRetry(async () => {
-      return await githubApi.client.request('PUT /repos/{owner}/{repo}/issues/{issue_number}/sub_issues/{sub_issue_number}', {
-        owner: github.context.repo.owner,
-        repo: github.context.repo.repo,
-        issue_number: parentIssue.number,
-        sub_issue_number: subIssue.number
-      });
-    }, 'add-sub-issue');
+    // Use the enhanced GitHub API to establish sub-issue relationship
+    await githubApi.addSubIssueRelationship(parentIssue, subIssue);
     
     core.info(`Added issue #${subIssue.number} as sub-issue of #${parentIssue.number}`);
   } catch (error) {

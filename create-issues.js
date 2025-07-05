@@ -280,30 +280,31 @@ function createOrGetIssue(task, parentTask, parentIssue) {
 // Helper to add sub-issue (GitHub Projects/Tasks API)
 function addSubIssue(parentIssue, subIssue) {
     return __awaiter(this, void 0, void 0, function () {
+        var error_1;
         return __generator(this, function (_a) {
-            if (parentIssue.subIssues.some(function (s) { return s.id === subIssue.id; })) {
-                console.log("Sub-issue #".concat(subIssue.number, " is already a sub-issue of parent #").concat(parentIssue.number, "."));
-                return [2 /*return*/];
+            switch (_a.label) {
+                case 0:
+                    if (parentIssue.subIssues.some(function (s) { return s.id === subIssue.id; })) {
+                        console.log("Sub-issue #".concat(subIssue.number, " is already a sub-issue of parent #").concat(parentIssue.number, "."));
+                        return [2 /*return*/];
+                    }
+                    _a.label = 1;
+                case 1:
+                    _a.trys.push([1, 3, , 4]);
+                    // Use the enhanced GitHub API to establish sub-issue relationship
+                    return [4 /*yield*/, githubApi.addSubIssueRelationship(parentIssue, subIssue)];
+                case 2:
+                    // Use the enhanced GitHub API to establish sub-issue relationship
+                    _a.sent();
+                    parentIssue.subIssues.push(subIssue);
+                    console.log("Added sub-issue #".concat(subIssue.number, " to parent #").concat(parentIssue.number, "."));
+                    return [3 /*break*/, 4];
+                case 3:
+                    error_1 = _a.sent();
+                    console.warn("Failed to add sub-issue relationship: ".concat(error_1 instanceof Error ? error_1.message : String(error_1)));
+                    return [3 /*break*/, 4];
+                case 4: return [2 /*return*/];
             }
-            // Note: GitHub's addSubIssue API may not be available in all cases
-            // This is a placeholder for when such functionality becomes available
-            try {
-                // await githubApi.executeWithRetry(async () => {
-                //   return await octokit.issues.addSubIssue({
-                //     owner: GITHUB_OWNER!,
-                //     repo: GITHUB_REPO!,
-                //     issue_number: parentIssue.number,
-                //     sub_issue_id: subIssue.id,
-                //   });
-                // }, 'add-sub-issue');
-                parentIssue.subIssues.push(subIssue);
-                console.log("Added sub-issue #".concat(subIssue.number, " to parent #").concat(parentIssue.number, "."));
-            }
-            catch (error) {
-                console.warn("Failed to add sub-issue relationship: ".concat(error instanceof Error ? error.message : String(error)));
-                // Continue without sub-issue relationship
-            }
-            return [2 /*return*/];
         });
     });
 }
@@ -323,25 +324,21 @@ function updateBodyWithRequiredBy(body, requiredByIssues) {
 }
 function getSubIssues(issue) {
     return __awaiter(this, void 0, void 0, function () {
+        var subIssues, error_2;
         return __generator(this, function (_a) {
-            // Note: GitHub's listSubIssues API may not be available in all cases
-            // Return empty array as fallback
-            try {
-                // const subIssues = await githubApi.executeWithRetry(async () => {
-                //   return await octokit.issues.listSubIssues({
-                //     owner: GITHUB_OWNER!,
-                //     repo: GITHUB_REPO!,
-                //     issue_number: issue.number,
-                //   });
-                // }, 'list-sub-issues');
-                // return subIssues.data;
-                return [2 /*return*/, []];
+            switch (_a.label) {
+                case 0:
+                    _a.trys.push([0, 2, , 3]);
+                    return [4 /*yield*/, githubApi.findSubIssues(issue)];
+                case 1:
+                    subIssues = _a.sent();
+                    return [2 /*return*/, subIssues];
+                case 2:
+                    error_2 = _a.sent();
+                    console.warn("Failed to fetch sub-issues for #".concat(issue.number, ": ").concat(error_2 instanceof Error ? error_2.message : String(error_2)));
+                    return [2 /*return*/, []];
+                case 3: return [2 /*return*/];
             }
-            catch (error) {
-                console.warn("Failed to fetch sub-issues for #".concat(issue.number, ": ").concat(error instanceof Error ? error.message : String(error)));
-                return [2 /*return*/, []];
-            }
-            return [2 /*return*/];
         });
     });
 }

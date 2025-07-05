@@ -11,7 +11,8 @@
         "test:labels": "./test/test-label-hierarchy.sh",
         "test:generate": "./test/test-generate-workflow.sh",
         "test:issue-creation": "./test/test-issue-creation.sh",
-        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && ./test/test-issue-creation.sh"
+        "test:sub-issues": "npx ts-node test/test-sub-issues-api.ts",
+        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && ./test/test-issue-creation.sh && npm run test:sub-issues"
     },
     "dependencies": {
         "@actions/core": "^1.10.1",
