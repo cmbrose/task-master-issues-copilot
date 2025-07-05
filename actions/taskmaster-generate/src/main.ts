@@ -11,8 +11,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DefaultArtifactClient } from '@actions/artifact';
 import { setupTaskmasterCli, getTaskmasterConfigFromInputs, runTaskmasterCli, validateTaskGraph } from './taskmaster-cli';
-import { loadConfig, TaskmasterConfig } from '@scripts/index';
-import { createGitHubApiClient, EnhancedGitHubApi } from '@scripts/github-api';
+import { loadConfig, TaskmasterConfig } from '../../../scripts/index';
+import { createGitHubApiClient, EnhancedGitHubApi } from '../../../scripts/github-api';
 import { components } from "@octokit/openapi-types";
 
 // GitHub API types
