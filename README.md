@@ -220,11 +220,8 @@ jobs:
   generate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        
       - name: Generate Issues from PRD
-        uses: ./actions/taskmaster-generate
+        uses: cmbrose/task-master-issues@v1
         with:
           complexity-threshold: '40'
           max-depth: '3'
@@ -232,7 +229,26 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+**Repository Checkout:** The action automatically handles repository checkout. For manual control:
+
+```yaml
+steps:
+  - name: Checkout
+    uses: actions/checkout@v4
+  - name: Generate Issues
+    uses: cmbrose/task-master-issues@v1
+    with:
+      skip-checkout: 'true'
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
 **Inputs:**
+- `repository` (optional): Repository name (owner/repo) to checkout
+- `ref` (optional): Branch, tag, or SHA to checkout  
+- `checkout-token` (optional): GitHub token for checkout (defaults to github-token)
+- `ssh-key` (optional): SSH private key for repository access
+- `fetch-depth` (optional, default: `1`): Number of commits to fetch
+- `skip-checkout` (optional, default: `false`): Skip repository checkout
 - `complexity-threshold` (optional, default: `40`): Maximum complexity for task breakdown
 - `max-depth` (optional, default: `3`): Maximum recursion depth for task hierarchy
 - `prd-path-glob` (optional, default: `docs/**.prd.md`): Glob pattern for PRD files
@@ -258,11 +274,8 @@ jobs:
     if: startsWith(github.event.comment.body, '/breakdown')
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        
       - name: Break Down Issue
-        uses: ./actions/taskmaster-breakdown
+        uses: cmbrose/task-master-issues/actions/taskmaster-breakdown@v1
         with:
           breakdown-max-depth: '2'
           complexity-threshold: '40'
@@ -300,11 +313,8 @@ jobs:
   watch:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        
       - name: Update Dependencies
-        uses: ./actions/taskmaster-watcher
+        uses: cmbrose/task-master-issues/actions/taskmaster-watcher@v1
         with:
           scan-mode: ${{ github.event_name == 'schedule' && 'full' || 'webhook' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -347,6 +357,37 @@ The `github-token` requires the following permissions:
 - `issues:write` - Create and update issues
 - `contents:read` - Read repository contents
 - `metadata:read` - Access repository metadata
+
+### Repository Checkout Configuration
+
+All Taskmaster actions include built-in repository checkout capabilities:
+
+**Basic checkout options:**
+- `repository`: Repository to checkout (defaults to current repo)
+- `ref`: Branch, tag, or SHA to checkout
+- `checkout-token`: GitHub token for authentication
+- `ssh-key`: SSH private key for authentication
+- `fetch-depth`: Number of commits to fetch (default: 1)
+- `skip-checkout`: Skip automatic checkout
+
+**For private repositories:**
+```yaml
+- uses: cmbrose/task-master-issues@v1
+  with:
+    repository: 'owner/private-repo'
+    checkout-token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+**For SSH authentication:**
+```yaml
+- uses: cmbrose/task-master-issues@v1
+  with:
+    ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+See [Repository Checkout Documentation](docs/repository-checkout.md) for complete configuration options.
 
 ## Complete Workflow Example
 

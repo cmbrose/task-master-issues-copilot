@@ -18,6 +18,7 @@ jobs:
         id: generate
         uses: ./actions/taskmaster-generate
         with:
+          skip-checkout: 'true'
           complexity-threshold: '50'
           max-depth: '2'
           prd-path-glob: 'docs/**.prd.md'
@@ -38,6 +39,7 @@ jobs:
         id: breakdown
         uses: ./actions/taskmaster-breakdown
         with:
+          skip-checkout: 'true'
           breakdown-max-depth: '3'
           complexity-threshold: '30'
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -57,6 +59,7 @@ jobs:
         id: watcher
         uses: ./actions/taskmaster-watcher
         with:
+          skip-checkout: 'true'
           scan-mode: 'full'
           github-token: ${{ secrets.GITHUB_TOKEN }}
           
