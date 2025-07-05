@@ -118,3 +118,13 @@ export {
   type RateLimitInfo,
   type ApiIssue
 } from './github-api';
+
+// Export YAML front-matter parsing utilities
+export {
+  parseYamlFrontMatter,
+  extractIssueMetadata,
+  validateFrontMatter,
+  type ParsedFrontMatter,
+  type FrontMatterParseResult,
+  type ExtendedMetadata
+} from './yaml-frontmatter-parser';
