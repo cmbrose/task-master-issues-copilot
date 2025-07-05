@@ -2,12 +2,12 @@ name: Auto Publish and Merge PR on Assignment
 
 on:
   pull_request:
-    types: [assigned]
+    types: [review_requested]
 
 jobs:
   publish-and-merge:
     runs-on: ubuntu-latest
-    if: contains(fromJson(toJson(github.event.pull_request.assignees)).*.login, 'cmbrose')
+    if: github.event.requested_reviewer.login == 'cmbrose'
     steps:
       - name: Publish draft PR if needed and merge
         uses: actions/github-script@v7
