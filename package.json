@@ -7,6 +7,8 @@
         "start": "ts-node create-issues.ts",
         "build": "tsc create-issues.ts",
         "lint": "tsc --noEmit",
+        "demo:issue-parser": "npx ts-node demo/issue-parser-demo.ts",
+        "demo:enhanced-management": "npx ts-node demo/enhanced-issue-management.ts",
         "test:triggers": "./test/test-triggers.sh",
         "test:labels": "./test/test-label-hierarchy.sh",
         "test:generate": "./test/test-generate-workflow.sh",
