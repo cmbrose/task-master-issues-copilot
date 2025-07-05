@@ -1,18 +1,21 @@
 import { Octokit } from "@octokit/rest";
 import { graphql } from "@octokit/graphql";
 
-const token = process.env.GITHUB_TOKEN;
+const graphQlToken = process.env.GITHUB_GRAPHQL_TOKEN;
+const mergeToken = process.env.GITHUB_MERGE_TOKEN;
 const prNumber = process.env.PR_NUMBER;
 const repoFull = process.env.REPO;
 
-if (!token || !repoFull) {
+if (!graphQlToken || !mergeToken || !repoFull) {
   console.error("Missing required environment variables: GITHUB_TOKEN, REPO");
   process.exit(1);
 }
 
 const [owner, repo] = repoFull.split("/");
-const octokit = new Octokit({ auth: token });
-const graphqlWithAuth = graphql.defaults({ headers: { authorization: `token ${token}` } });
+// The PR is merged with a human's PAT so that it will trigger the auto-assign-copilot job, but 
+// GraphQL doesn't like the fine-grained token - so we need two tokens :shrug:
+const graphqlWithAuth = graphql.defaults({ headers: { authorization: `token ${graphQlToken}` } });
+const octokit = new Octokit({ auth: mergeToken });
 
 async function processPR(prNum: number) {
   try {
