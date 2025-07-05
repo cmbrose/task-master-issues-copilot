@@ -42,7 +42,7 @@ jobs:
 
       - name: Auto-publish and merge PR (TypeScript)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ISSUE_ASSIGNMENT_PAT }}
           PR_NUMBER: ${{ env.PR_NUMBER }}
           REPO: ${{ github.repository }}
         run: |
