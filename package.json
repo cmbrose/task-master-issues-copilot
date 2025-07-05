@@ -14,14 +14,15 @@
         "test:generate": "./test/test-generate-workflow.sh",
         "test:issue-creation": "./test/test-issue-creation.sh",
         "test:sub-issues-api": "npx ts-node test/test-sub-issues-api.ts",
+        "test:enhanced-error-handling": "npx ts-node test/test-simple-enhanced.ts",
         "test:yaml-parser": "./test/test-yaml-parser.sh",
-        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && npm run test:issue-creation && npm run test:yaml-parser && npm run test:sub-issues-api"
+        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && npm run test:issue-creation && npm run test:yaml-parser && npm run test:sub-issues-api && npm run test:enhanced-error-handling"
     },
     "dependencies": {
         "@actions/core": "^1.10.1",
         "@actions/github": "^6.0.0",
-        "@octokit/rest": "^20.0.0",
-        "@octokit/openapi-types": "^19.0.0",
+        "@octokit/openapi-types": "^25.1.0",
+        "@octokit/rest": "^20.1.2",
         "dotenv": "^16.0.0",
         "js-yaml": "^4.1.0"
     },
