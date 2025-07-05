@@ -14,7 +14,9 @@
         "test:generate": "./test/test-generate-workflow.sh",
         "test:issue-creation": "./test/test-issue-creation.sh",
         "test:yaml-parser": "./test/test-yaml-parser.sh",
-        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && ./test/test-issue-creation.sh && ./test/test-yaml-parser.sh"
+        "test:artifact-retention": "./test/test-artifact-retention.sh",
+        "test:artifact-cleanup": "./test/test-artifact-cleanup-functionality.sh",
+        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && ./test/test-issue-creation.sh && ./test/test-yaml-parser.sh && ./test/test-artifact-retention.sh && ./test/test-artifact-cleanup-functionality.sh"
     },
     "dependencies": {
         "@actions/artifact": "^2.3.2",

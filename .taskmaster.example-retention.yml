@@ -1,0 +1,37 @@
+# Taskmaster Configuration with Artifact Retention Policies
+# This example shows how to configure artifact retention settings
+
+taskmaster:
+  # Task generation settings
+  complexity-threshold: 40
+  max-depth: 3
+  prd-path-glob: "docs/**.prd.md"
+  
+  # Artifact retention policies
+  max-artifacts-count: 15    # Keep maximum 15 artifacts
+  retention-days: 45         # Keep artifacts for 45 days
+  
+  # Taskmaster CLI settings
+  taskmaster-version: "1.0.0"
+  force-download: false
+  
+  # Watcher settings
+  scan-mode: "webhook"
+
+# Environment-specific configurations
+environments:
+  development:
+    # More aggressive cleanup in development
+    max-artifacts-count: 5
+    retention-days: 14
+    force-download: true
+    
+  production:
+    # Conservative cleanup in production
+    max-artifacts-count: 25
+    retention-days: 90
+    
+  testing:
+    # Minimal retention for testing
+    max-artifacts-count: 3
+    retention-days: 7
