@@ -152,7 +152,9 @@ async function uploadTaskGraphArtifact(
       file_size_bytes: sizeInfo.sizeBytes.toString(),
       file_size_kb: sizeInfo.sizeKB.toString(),
       file_size_mb: sizeInfo.sizeMB.toString(),
-      prd_file_path: prdFilePath
+      prd_file_path: prdFilePath,
+      retention_days: config.retentionDays.toString(),
+      max_artifacts_count: config.maxArtifactsCount.toString()
     };
     
     // Log metadata for transparency
@@ -165,6 +167,8 @@ async function uploadTaskGraphArtifact(
     core.info(`  • Leaf Tasks Count: ${metadata.leaf_tasks_count}`);
     core.info(`  • Task Hierarchy Depth: ${metadata.task_hierarchy_depth}`);
     core.info(`  • File Size: ${sizeInfo.sizeMB} MB (${sizeInfo.sizeBytes} bytes)`);
+    core.info(`  • Retention Days: ${metadata.retention_days}`);
+    core.info(`  • Max Artifacts Count: ${metadata.max_artifacts_count}`);
     
     // Validate artifact size
     const maxSizeMB = 100; // GitHub artifact size limit consideration
@@ -187,7 +191,7 @@ async function uploadTaskGraphArtifact(
       files,
       rootDirectory,
       {
-        retentionDays: 30 // Keep artifacts for 30 days
+        retentionDays: config.retentionDays // Use configurable retention days
       }
     );
     
@@ -661,7 +665,11 @@ async function run(): Promise<void> {
         taskmasterVersion: core.getInput('taskmaster-version') || undefined,
         taskmasterBaseUrl: core.getInput('taskmaster-base-url') || undefined,
         forceDownload: core.getInput('force-download') ? 
-          core.getBooleanInput('force-download') : undefined
+          core.getBooleanInput('force-download') : undefined,
+        maxArtifactsCount: core.getInput('max-artifacts-count') ? 
+          parseInt(core.getInput('max-artifacts-count'), 10) : undefined,
+        retentionDays: core.getInput('retention-days') ? 
+          parseInt(core.getInput('retention-days'), 10) : undefined
       }
     );
 
@@ -670,6 +678,8 @@ async function run(): Promise<void> {
     core.info(`  • Max depth: ${config.maxDepth}`);
     core.info(`  • PRD path glob: ${config.prdPathGlob}`);
     core.info(`  • Taskmaster version: ${config.taskmasterVersion}`);
+    core.info(`  • Retention days: ${config.retentionDays}`);
+    core.info(`  • Max artifacts count: ${config.maxArtifactsCount}`);
 
     // Set up Taskmaster CLI binary with version pinning
     const taskmasterConfig = {

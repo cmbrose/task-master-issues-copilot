@@ -73,6 +73,16 @@ inputs:
   github-token:
     description: 'GitHub token for API access'
     required: true
+  
+  # Artifact retention configuration
+  max-artifacts-count:
+    description: 'Maximum number of artifacts to keep (older ones will be cleaned up)'
+    required: false
+    default: '10'
+  retention-days:
+    description: 'Number of days to keep artifacts before cleanup'
+    required: false
+    default: '30'
 
 outputs:
   task-graph:
@@ -101,6 +111,10 @@ outputs:
     description: 'Leaf tasks count from the uploaded artifact metadata'
   metadata-task-hierarchy-depth:
     description: 'Task hierarchy depth from the uploaded artifact metadata'
+  metadata-retention-days:
+    description: 'Retention days configured for the uploaded artifact'
+  metadata-max-artifacts-count:
+    description: 'Maximum artifacts count configured for retention policy'
 
 runs:
   using: 'composite'
@@ -141,6 +155,8 @@ runs:
         INPUT_TASKMASTER-BASE-URL: ${{ inputs.taskmaster-base-url }}
         INPUT_FORCE-DOWNLOAD: ${{ inputs.force-download }}
         INPUT_GITHUB-TOKEN: ${{ inputs.github-token }}
+        INPUT_MAX-ARTIFACTS-COUNT: ${{ inputs.max-artifacts-count }}
+        INPUT_RETENTION-DAYS: ${{ inputs.retention-days }}
 
 branding:
   icon: 'list'

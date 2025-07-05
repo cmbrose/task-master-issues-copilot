@@ -37,6 +37,10 @@ export interface TaskmasterConfig {
   // GitHub integration
   githubToken: string;
   
+  // Artifact retention policies
+  maxArtifactsCount: number;
+  retentionDays: number;
+  
   // Action mode
   actionMode: 'generate' | 'breakdown' | 'watcher' | 'full';
   
@@ -85,6 +89,8 @@ export const DEFAULT_CONFIG: TaskmasterConfig = {
   taskmasterArgs: '',
   forceDownload: false,
   githubToken: '',
+  maxArtifactsCount: 10,
+  retentionDays: 30,
   actionMode: 'full',
   outputFormat: 'auto',
   outputSanitize: true,
@@ -230,6 +236,26 @@ export const VALIDATION_RULES: ValidationRule[] = [
       return true;
     },
     sanitize: (value: any) => Math.max(1, Math.min(10485760, Number(value)))
+  },
+  {
+    key: 'maxArtifactsCount',
+    validate: (value: number) => {
+      if (typeof value !== 'number' || value < 1 || value > 100) {
+        return 'Max artifacts count must be a number between 1 and 100';
+      }
+      return true;
+    },
+    sanitize: (value: any) => Math.max(1, Math.min(100, Number(value)))
+  },
+  {
+    key: 'retentionDays',
+    validate: (value: number) => {
+      if (typeof value !== 'number' || value < 1 || value > 365) {
+        return 'Retention days must be a number between 1 and 365';
+      }
+      return true;
+    },
+    sanitize: (value: any) => Math.max(1, Math.min(365, Number(value)))
   }
 ];
 
@@ -306,6 +332,8 @@ export function loadFromEnvironment(): Partial<TaskmasterConfig> {
     ['taskmasterArgs', ['INPUT_TASKMASTER-ARGS', 'INPUT_TASKMASTER_ARGS', 'TM_TASKMASTER_ARGS']],
     ['forceDownload', ['INPUT_FORCE-DOWNLOAD', 'INPUT_FORCE_DOWNLOAD', 'TM_FORCE_DOWNLOAD']],
     ['githubToken', ['INPUT_GITHUB-TOKEN', 'INPUT_GITHUB_TOKEN', 'TM_GITHUB_TOKEN', 'GITHUB_TOKEN']],
+    ['maxArtifactsCount', ['INPUT_MAX-ARTIFACTS-COUNT', 'INPUT_MAX_ARTIFACTS_COUNT', 'TM_MAX_ARTIFACTS_COUNT']],
+    ['retentionDays', ['INPUT_RETENTION-DAYS', 'INPUT_RETENTION_DAYS', 'TM_RETENTION_DAYS']],
     ['actionMode', ['INPUT_ACTION-MODE', 'INPUT_ACTION_MODE', 'TM_ACTION_MODE']],
     ['outputFormat', ['INPUT_OUTPUT-FORMAT', 'INPUT_OUTPUT_FORMAT', 'TM_OUTPUT_FORMAT']],
     ['outputSanitize', ['INPUT_OUTPUT-SANITIZE', 'INPUT_OUTPUT_SANITIZE', 'TM_OUTPUT_SANITIZE']],
@@ -317,9 +345,10 @@ export function loadFromEnvironment(): Partial<TaskmasterConfig> {
       const value = process.env[envKey];
       if (value !== undefined) {
         // Convert string values to appropriate types
-        if (configKey === 'complexityThreshold' || configKey === 'maxDepth' || configKey === 'breakdownMaxDepth') {
+        if (configKey === 'complexityThreshold' || configKey === 'maxDepth' || configKey === 'breakdownMaxDepth' || 
+            configKey === 'maxArtifactsCount' || configKey === 'retentionDays' || configKey === 'outputMaxSize') {
           config[configKey] = parseInt(value, 10);
-        } else if (configKey === 'forceDownload') {
+        } else if (configKey === 'forceDownload' || configKey === 'outputSanitize') {
           config[configKey] = value.toLowerCase() === 'true';
         } else {
           (config as any)[configKey] = value;
