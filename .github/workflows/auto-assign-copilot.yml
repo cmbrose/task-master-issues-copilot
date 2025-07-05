@@ -42,4 +42,4 @@ jobs:
           ISSUE_NUMBER: ${{ env.ISSUE_NUMBER }}
           REPO: ${{ github.repository }}
         run: |
-          ts-node .github/scripts/auto-assign-copilot.ts
+          ts-node .github/workflows/scripts/auto-assign-copilot.ts
