@@ -75,7 +75,7 @@ jobs:
           echo "## :warning: Merge Conflicts Detected" > conflict_report.md
           echo "The following files have merge conflicts in PR #$PR_NUMBER:" >> conflict_report.md
           while read file; do
-            echo "### $file' >> conflict_report.md
+            echo "### $file" >> conflict_report.md
             echo "\`\`\`" >> conflict_report.md
             awk '/<<<<<<< /, />>>>>>> /' "$file" >> conflict_report.md
             echo "\`\`\`" >> conflict_report.md
