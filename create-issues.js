@@ -56,6 +56,15 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
+var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
+    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
+        if (ar || !(i in from)) {
+            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
+            ar[i] = from[i];
+        }
+    }
+    return to.concat(ar || Array.prototype.slice.call(from));
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 var fs = require("fs");
 var path = require("path");
@@ -97,7 +106,64 @@ catch (e) {
     // If not found or invalid, skip
     complexityMap = {};
 }
-// Helper to create issue body
+// Helper to update issue labels based on dependency status
+function updateDependencyLabels(task, dependencyIssues) {
+    var additionalLabels = [];
+    if (!dependencyIssues || dependencyIssues.length === 0) {
+        return additionalLabels;
+    }
+    var openDependencies = dependencyIssues.filter(function (issue) { return issue.state === 'open'; });
+    if (openDependencies.length > 0) {
+        additionalLabels.push('blocked');
+        additionalLabels.push("blocked-by:".concat(openDependencies.length));
+    }
+    else {
+        // All dependencies are closed, task is ready
+        additionalLabels.push('ready');
+    }
+    return additionalLabels;
+}
+// Helper to generate comprehensive labels for issues
+function generateIssueLabels(task, parentTask, complexityScore) {
+    var labels = ['taskmaster'];
+    // Priority labels
+    if (task.priority) {
+        labels.push("priority:".concat(task.priority.toLowerCase()));
+    }
+    // Status labels
+    if (task.status) {
+        labels.push("status:".concat(task.status.toLowerCase()));
+    }
+    // Task type labels
+    if (parentTask) {
+        labels.push('subtask');
+        labels.push("parent:".concat(parentTask.id));
+    }
+    else {
+        labels.push('main-task');
+    }
+    // Complexity labels
+    if (complexityScore !== undefined) {
+        if (complexityScore >= 8) {
+            labels.push('complexity:high');
+        }
+        else if (complexityScore >= 5) {
+            labels.push('complexity:medium');
+        }
+        else {
+            labels.push('complexity:low');
+        }
+    }
+    // Dependency status labels
+    if (task.dependencies && task.dependencies.length > 0) {
+        labels.push('has-dependencies');
+    }
+    // Hierarchy labels
+    if (task.subtasks && task.subtasks.length > 0) {
+        labels.push('has-subtasks');
+    }
+    return labels;
+}
 function buildIssueBody(task, parentIssue) {
     var _a, _b;
     var body = '';
@@ -162,20 +228,34 @@ function findExistingIssue(title) {
         });
     });
 }
+// Helper to create enhanced issue title with priority ordering
+function buildIssueTitle(task, parentTask) {
+    var title;
+    // Priority prefixes for ordering (high priority tasks appear first)
+    var priorityPrefix = task.priority ?
+        (task.priority.toLowerCase() === 'high' ? '[🔴 HIGH] ' :
+            task.priority.toLowerCase() === 'medium' ? '[🟡 MED] ' :
+                task.priority.toLowerCase() === 'low' ? '[🟢 LOW] ' : '') : '';
+    if (typeof parentTask !== 'undefined' && 'id' in task) {
+        title = "".concat(priorityPrefix, "[").concat(parentTask.id, ".").concat(task.id, "] ").concat(task.title);
+    }
+    else {
+        title = "".concat(priorityPrefix, "[").concat(task.id, "] ").concat(task.title);
+    }
+    return title;
+}
 // Helper to create or get issue
 function createOrGetIssue(task, parentTask, parentIssue) {
     return __awaiter(this, void 0, void 0, function () {
-        var title, body, existingIssue, createdIssue;
+        var title, body, taskId, complexity, labels, existingIssue, createdIssue;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
-                    if (typeof parentTask !== 'undefined' && 'id' in task) {
-                        title = "[".concat(parentTask.id, ".").concat(task.id, "] ").concat(task.title);
-                    }
-                    else {
-                        title = task.title;
-                    }
+                    title = buildIssueTitle(task, parentTask);
                     body = buildIssueBody(task, parentIssue);
+                    taskId = parentTask ? "".concat(parentTask.id, ".").concat(task.id) : String(task.id);
+                    complexity = complexityMap[taskId];
+                    labels = generateIssueLabels(task, parentTask, complexity);
                     return [4 /*yield*/, findExistingIssue(title)];
                 case 1:
                     existingIssue = _a.sent();
@@ -186,7 +266,7 @@ function createOrGetIssue(task, parentTask, parentIssue) {
                     return [4 /*yield*/, githubApi.createIssue({
                             title: title,
                             body: body,
-                            labels: ['taskmaster'],
+                            labels: labels,
                         })];
                 case 2:
                     createdIssue = _a.sent();
@@ -343,7 +423,7 @@ function main() {
                     return [3 /*break*/, 1];
                 case 4:
                     _loop_2 = function (task) {
-                        var issue, depIssues, reqByIssues, _p, _q, sub, issue_1, depIssues_1, reqByIssues_1;
+                        var issue, depIssues, reqByIssues, taskId, complexity, baseLabels, dependencyLabels, updatedLabels, needsUpdate, _p, _q, sub, issue_1, depIssues_1, reqByIssues_1, subTaskId, subComplexity, subBaseLabels, subDependencyLabels, subUpdatedLabels, subNeedsUpdate;
                         return __generator(this, function (_r) {
                             switch (_r.label) {
                                 case 0:
@@ -352,13 +432,20 @@ function main() {
                                     issue.expectedBody = updateIssueWithDependencies(issue.expectedBody, depIssues);
                                     reqByIssues = (_d = task.requiredBy) === null || _d === void 0 ? void 0 : _d.map(function (reqBy) { return idToIssue["".concat(reqBy.id)]; }).filter(Boolean);
                                     issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
-                                    if (!(issue.expectedBody !== issue.body)) return [3 /*break*/, 2];
+                                    taskId = String(task.id);
+                                    complexity = complexityMap[taskId];
+                                    baseLabels = generateIssueLabels(task, undefined, complexity);
+                                    dependencyLabels = updateDependencyLabels(task, depIssues);
+                                    updatedLabels = __spreadArray(__spreadArray([], baseLabels, true), dependencyLabels, true);
+                                    needsUpdate = issue.expectedBody !== issue.body;
+                                    if (!needsUpdate) return [3 /*break*/, 2];
                                     return [4 /*yield*/, githubApi.updateIssue(issue.number, {
                                             body: issue.expectedBody,
+                                            labels: updatedLabels,
                                         })];
                                 case 1:
                                     _r.sent();
-                                    console.log("Updated issue #".concat(issue.number, " with dependencies/required-bys."));
+                                    console.log("Updated issue #".concat(issue.number, " with dependencies/required-bys and labels."));
                                     _r.label = 2;
                                 case 2:
                                     if (!task.subtasks) return [3 /*break*/, 6];
@@ -372,13 +459,20 @@ function main() {
                                     issue_1.expectedBody = updateIssueWithDependencies(issue_1.expectedBody, depIssues_1);
                                     reqByIssues_1 = (_f = sub.requiredBy) === null || _f === void 0 ? void 0 : _f.map(function (reqBy) { return idToIssue["".concat(task.id, ".").concat(reqBy.id)]; }).filter(Boolean);
                                     issue_1.expectedBody = updateBodyWithRequiredBy(issue_1.expectedBody, reqByIssues_1);
-                                    if (!(issue_1.expectedBody !== issue_1.body)) return [3 /*break*/, 5];
+                                    subTaskId = "".concat(task.id, ".").concat(sub.id);
+                                    subComplexity = complexityMap[subTaskId];
+                                    subBaseLabels = generateIssueLabels(sub, task, subComplexity);
+                                    subDependencyLabels = updateDependencyLabels(sub, depIssues_1);
+                                    subUpdatedLabels = __spreadArray(__spreadArray([], subBaseLabels, true), subDependencyLabels, true);
+                                    subNeedsUpdate = issue_1.expectedBody !== issue_1.body;
+                                    if (!subNeedsUpdate) return [3 /*break*/, 5];
                                     return [4 /*yield*/, githubApi.updateIssue(issue_1.number, {
                                             body: issue_1.expectedBody,
+                                            labels: subUpdatedLabels,
                                         })];
                                 case 4:
                                     _r.sent();
-                                    console.log("Updated issue #".concat(issue_1.number, " with dependencies/required-bys."));
+                                    console.log("Updated issue #".concat(issue_1.number, " with dependencies/required-bys and labels."));
                                     _r.label = 5;
                                 case 5:
                                     _p++;
