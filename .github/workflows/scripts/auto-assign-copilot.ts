@@ -121,9 +121,14 @@ async function assignCopilotViaGraphQL(issueNumber: number) {
 }
 
 async function checkAndAssignCopilot(issueNumber: number) {
-  const { data: reqIssue } = await octokit.issues.get({ owner, repo, issue_number: issueNumber });
+  const { data: issue } = await octokit.issues.get({ owner, repo, issue_number: issueNumber });
 
-  const body = normalizeBody(reqIssue.body);
+  if (issue.state === 'closed') {
+    console.log(`Issue #${issueNumber} is already closed. Skipping assignment.`);
+    return;
+  }
+
+  const body = normalizeBody(issue.body);
 
   const dependencies = parseDependencies(body);
   const allDepsClosed = await Promise.all(dependencies.map(isClosed)).then(arr => arr.every(Boolean));
