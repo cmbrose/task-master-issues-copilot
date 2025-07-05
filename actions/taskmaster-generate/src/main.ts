@@ -156,10 +156,17 @@ async function run(): Promise<void> {
         complexityThreshold: config.complexityThreshold,
         maxDepth: config.maxDepth,
         outputPath: taskGraphPath,
-        additionalArgs: config.taskmasterArgs ? config.taskmasterArgs.split(' ').filter(arg => arg.trim()) : []
+        additionalArgs: config.taskmasterArgs ? config.taskmasterArgs.split(' ').filter(arg => arg.trim()) : [],
+        // Enhanced options for better reliability
+        retryAttempts: 2,
+        retryDelay: 1000,
+        enableProgressMonitoring: true,
+        gracefulShutdown: true,
+        timeout: 300000 // 5 minutes
       });
 
       core.info(`✅ CLI execution completed with exit code: ${runResult.exitCode}`);
+      core.info(`⏱️ Execution took ${Math.round(runResult.duration / 1000)}s over ${runResult.attemptsCount} attempt(s)`);
       
       // Validate the generated task graph
       if (runResult.taskGraphGenerated) {
