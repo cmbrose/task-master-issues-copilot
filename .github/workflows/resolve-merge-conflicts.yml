@@ -50,6 +50,7 @@ jobs:
           llm install llm-github-models
           sudo apt-get update -qq
           sudo apt-get install -yqq jq
+          llm keys set github --value ${{ secrets.GITHUB_TOKEN }}
           
       - name: Fetch PR and base branches
         run: |
