@@ -10,8 +10,8 @@ import * as github from '@actions/github';
 import * as fs from 'fs';
 import * as path from 'path';
 import { setupTaskmasterCli, getTaskmasterConfigFromInputs, runTaskmasterCli, validateTaskGraph } from './taskmaster-cli';
-import { loadConfig, TaskmasterConfig } from '@scripts/index';
-import { createGitHubApiClient, EnhancedGitHubApi } from '@scripts/github-api';
+import { loadConfig, TaskmasterConfig } from '../../../scripts/index';
+import { createGitHubApiClient, EnhancedGitHubApi } from '../../../scripts/github-api';
 import { components } from "@octokit/openapi-types";
 
 // GitHub API types
@@ -530,7 +530,7 @@ async function run(): Promise<void> {
         complexityThreshold: config.complexityThreshold,
         maxDepth: config.maxDepth,
         outputPath: taskGraphPath,
-        additionalArgs: config.taskmasterArgs ? config.taskmasterArgs.split(' ').filter(arg => arg.trim()) : [],
+        additionalArgs: config.taskmasterArgs ? config.taskmasterArgs.split(' ').filter((arg: string) => arg.trim()) : [],
         // Enhanced options for better reliability
         retryAttempts: 2,
         retryDelay: 1000,
