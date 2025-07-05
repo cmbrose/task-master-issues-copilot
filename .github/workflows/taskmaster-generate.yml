@@ -1,0 +1,104 @@
+name: Taskmaster Generate
+
+on:
+  # Trigger on push to PRD files
+  push:
+    paths:
+      - 'docs/**.prd.md'
+      - 'docs/**/*.prd.md'
+    branches:
+      - main
+      - master
+
+  # Manual dispatch for testing and one-off runs
+  workflow_dispatch:
+    inputs:
+      prd-path-glob:
+        description: 'Path glob pattern for PRD files'
+        required: false
+        default: 'docs/**.prd.md'
+        type: string
+      complexity-threshold:
+        description: 'Maximum complexity threshold for task breakdown (1-100)'
+        required: false
+        default: '40'
+        type: string
+      max-depth:
+        description: 'Maximum depth for automatic task recursion (1-10)'
+        required: false
+        default: '3'
+        type: string
+      taskmaster-version:
+        description: 'Version of Taskmaster CLI to use'
+        required: false
+        default: '1.0.0'
+        type: string
+      force-download:
+        description: 'Force download of Taskmaster CLI even if cached'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    name: Generate Tasks and Issues
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Log Trigger Information
+        run: |
+          echo "🚀 Taskmaster Generate triggered by: ${{ github.event_name }}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "👤 Triggered manually by: ${{ github.actor }}"
+            echo "⚙️ Parameters:"
+            echo "  • PRD path glob: ${{ inputs.prd-path-glob }}"
+            echo "  • Complexity threshold: ${{ inputs.complexity-threshold }}"
+            echo "  • Max depth: ${{ inputs.max-depth }}"
+            echo "  • Taskmaster version: ${{ inputs.taskmaster-version }}"
+            echo "  • Force download: ${{ inputs.force-download }}"
+          else
+            echo "📝 PRD files changed in commit: ${{ github.sha }}"
+            echo "👤 Committed by: ${{ github.event.head_commit.author.name }}"
+          fi
+
+      - name: Run Taskmaster Generate
+        id: taskmaster-generate
+        uses: ./actions/taskmaster-generate
+        with:
+          skip-checkout: 'true'
+          prd-path-glob: ${{ github.event_name == 'workflow_dispatch' && inputs.prd-path-glob || 'docs/**.prd.md' }}
+          complexity-threshold: ${{ github.event_name == 'workflow_dispatch' && inputs.complexity-threshold || '40' }}
+          max-depth: ${{ github.event_name == 'workflow_dispatch' && inputs.max-depth || '3' }}
+          taskmaster-version: ${{ github.event_name == 'workflow_dispatch' && inputs.taskmaster-version || '1.0.0' }}
+          force-download: ${{ github.event_name == 'workflow_dispatch' && inputs.force-download || false }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Task Graph Artifact
+        if: steps.taskmaster-generate.outputs.task-graph
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-graph-${{ github.run_id }}
+          path: ${{ steps.taskmaster-generate.outputs.task-graph }}
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          echo "## 📊 Taskmaster Generate Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Task Graph**: ${{ steps.taskmaster-generate.outputs.task-graph && 'Generated and uploaded as artifact' || 'Not generated' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Issues Created**: ${{ steps.taskmaster-generate.outputs.issues-created || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ steps.taskmaster-generate.outputs.task-graph-generated }}" == "true" ]]; then
+            echo "✅ Task graph generation completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Task graph generation failed" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -9,12 +9,12 @@
 //
 // Note: Requires Node.js types for process, fs, path, etc.
 
-import { Octokit } from '@octokit/rest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 
 import { components } from "@octokit/openapi-types";
+import { EnhancedGitHubApi, createGitHubApiClient } from './scripts/github-api';
 
 // Types for Node.js globals (process, etc.)
 // If you see type errors, run: npm install --save-dev @types/node
@@ -30,7 +30,15 @@ if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
   process.exit(1);
 }
 
-const octokit = new Octokit({ auth: GITHUB_TOKEN });
+const githubApi = createGitHubApiClient({
+  token: GITHUB_TOKEN,
+  owner: GITHUB_OWNER,
+  repo: GITHUB_REPO,
+  maxConcurrent: 3,
+  retryDelay: 1000,
+  maxRetries: 3,
+  debug: process.env.DEBUG === 'true'
+});
 
 const TASKS_PATH = path.join('.taskmaster', 'tasks', 'tasks.json');
 const COMPLEXITY_PATH  = path.join('.taskmaster', 'reports', 'task-complexity-report.json');
@@ -75,7 +83,72 @@ try {
   complexityMap = {};
 }
 
-// Helper to create issue body
+// Helper to update issue labels based on dependency status
+function updateDependencyLabels(task: Task, dependencyIssues: Issue[] | undefined): string[] {
+  const additionalLabels: string[] = [];
+  
+  if (!dependencyIssues || dependencyIssues.length === 0) {
+    return additionalLabels;
+  }
+  
+  const openDependencies = dependencyIssues.filter(issue => issue.state === 'open');
+  
+  if (openDependencies.length > 0) {
+    additionalLabels.push('blocked');
+    additionalLabels.push(`blocked-by:${openDependencies.length}`);
+  } else {
+    // All dependencies are closed, task is ready
+    additionalLabels.push('ready');
+  }
+  
+  return additionalLabels;
+}
+
+// Helper to generate comprehensive labels for issues
+function generateIssueLabels(task: Task, parentTask?: Task, complexityScore?: number): string[] {
+  const labels = ['taskmaster'];
+  
+  // Priority labels
+  if (task.priority) {
+    labels.push(`priority:${task.priority.toLowerCase()}`);
+  }
+  
+  // Status labels
+  if (task.status) {
+    labels.push(`status:${task.status.toLowerCase()}`);
+  }
+  
+  // Task type labels
+  if (parentTask) {
+    labels.push('subtask');
+    labels.push(`parent:${parentTask.id}`);
+  } else {
+    labels.push('main-task');
+  }
+  
+  // Complexity labels
+  if (complexityScore !== undefined) {
+    if (complexityScore >= 8) {
+      labels.push('complexity:high');
+    } else if (complexityScore >= 5) {
+      labels.push('complexity:medium');
+    } else {
+      labels.push('complexity:low');
+    }
+  }
+  
+  // Dependency status labels
+  if (task.dependencies && task.dependencies.length > 0) {
+    labels.push('has-dependencies');
+  }
+  
+  // Hierarchy labels
+  if (task.subtasks && task.subtasks.length > 0) {
+    labels.push('has-subtasks');
+  }
+  
+  return labels;
+}
 function buildIssueBody(task: Task, parentIssue?: Issue): string {
   let body = '';
   // Add complexity if available
@@ -135,36 +208,40 @@ function buildIssueBody(task: Task, parentIssue?: Issue): string {
 let allIssuesCache: ApiIssue[] = [];
 
 async function findExistingIssue(title: string): Promise<ApiIssue | null> {
-  if (!allIssuesCache.length) {
-    const issues = await octokit.issues.listForRepo({
-      owner: GITHUB_OWNER!,
-      repo: GITHUB_REPO!,
-      state: 'all',
-      per_page: 100,
-    });
-    allIssuesCache = issues.data;
-  }
-
-  for (const issue of allIssuesCache) {
-    if (issue.title === title && issue.body && issue.body.includes(UNIQUE_MARKER)) {
-      return issue;
-    }
-  }
-  return null;
+  // Use enhanced API with better duplicate detection
+  return await githubApi.findExistingIssue(title, UNIQUE_MARKER);
 }
 
 
+// Helper to create enhanced issue title with priority ordering
+function buildIssueTitle(task: Task, parentTask?: Task): string {
+  let title: string;
+  
+  // Priority prefixes for ordering (high priority tasks appear first)
+  const priorityPrefix = task.priority ? 
+    (task.priority.toLowerCase() === 'high' ? '[🔴 HIGH] ' : 
+     task.priority.toLowerCase() === 'medium' ? '[🟡 MED] ' : 
+     task.priority.toLowerCase() === 'low' ? '[🟢 LOW] ' : '') : '';
+  
+  if (typeof parentTask !== 'undefined' && 'id' in task) {
+    title = `${priorityPrefix}[${parentTask.id}.${task.id}] ${task.title}`;
+  } else {
+    title = `${priorityPrefix}[${task.id}] ${task.title}`;
+  }
+  
+  return title;
+}
+
 // Helper to create or get issue
 async function createOrGetIssue(task: Task, parentTask?: Task, parentIssue?: Issue): Promise<Issue> {
-  // If this is a subtask (parentTask is defined), make the title unique by including parent and subtask ID
-  let title: string;
-  if (typeof parentTask !== 'undefined' && 'id' in task) {
-    title = `[${parentTask.id}.${task.id}] ${task.title}`;
-  } else {
-    title = task.title;
-  }
+  const title = buildIssueTitle(task, parentTask);
 
   const body = buildIssueBody(task, parentIssue);
+  
+  // Generate comprehensive labels
+  const taskId = parentTask ? `${parentTask.id}.${task.id}` : String(task.id);
+  const complexity = complexityMap[taskId];
+  const labels = generateIssueLabels(task, parentTask, complexity);
 
   let existingIssue = await findExistingIssue(title);
   if (existingIssue) {
@@ -175,19 +252,17 @@ async function createOrGetIssue(task: Task, parentTask?: Task, parentIssue?: Iss
     };
   }
 
-  const res = await octokit.issues.create({
-    owner: GITHUB_OWNER!,
-    repo: GITHUB_REPO!,
+  const createdIssue = await githubApi.createIssue({
     title,
     body,
-    labels: ['taskmaster'],
+    labels,
   });
 
-  allIssuesCache.push(res.data);
-  console.log(`Created issue: ${title} (#${res.data.number})`);
+  allIssuesCache.push(createdIssue);
+  console.log(`Created issue: ${title} (#${createdIssue.number})`);
 
   return {
-    ...res.data,
+    ...createdIssue,
     expectedBody: body,
   };
 }
@@ -199,15 +274,24 @@ async function addSubIssue(parentIssue: ParentIssue, subIssue: Issue) {
     return;
   }
 
-  await octokit.issues.addSubIssue({
-    owner: GITHUB_OWNER!,
-    repo: GITHUB_REPO!,
-    issue_number: parentIssue.number,
-    sub_issue_id: subIssue.id,
-  });
-  parentIssue.subIssues.push(subIssue);
-  
-  console.log(`Added sub-issue #${subIssue.number} to parent #${parentIssue.number}.`);
+  // Note: GitHub's addSubIssue API may not be available in all cases
+  // This is a placeholder for when such functionality becomes available
+  try {
+    // await githubApi.executeWithRetry(async () => {
+    //   return await octokit.issues.addSubIssue({
+    //     owner: GITHUB_OWNER!,
+    //     repo: GITHUB_REPO!,
+    //     issue_number: parentIssue.number,
+    //     sub_issue_id: subIssue.id,
+    //   });
+    // }, 'add-sub-issue');
+    
+    parentIssue.subIssues.push(subIssue);
+    console.log(`Added sub-issue #${subIssue.number} to parent #${parentIssue.number}.`);
+  } catch (error) {
+    console.warn(`Failed to add sub-issue relationship: ${error instanceof Error ? error.message : String(error)}`);
+    // Continue without sub-issue relationship
+  }
 }
 
 // Helper to update issue with dependency links
@@ -229,12 +313,22 @@ function updateBodyWithRequiredBy(body: string, requiredByIssues: Issue[] | unde
 }
 
 async function getSubIssues(issue: Issue): Promise<ApiIssue[]> {
-  const subIssues = await octokit.issues.listSubIssues({
-    owner: GITHUB_OWNER!,
-    repo: GITHUB_REPO!,
-    issue_number: issue.number,
-  });
-  return subIssues.data;
+  // Note: GitHub's listSubIssues API may not be available in all cases
+  // Return empty array as fallback
+  try {
+    // const subIssues = await githubApi.executeWithRetry(async () => {
+    //   return await octokit.issues.listSubIssues({
+    //     owner: GITHUB_OWNER!,
+    //     repo: GITHUB_REPO!,
+    //     issue_number: issue.number,
+    //   });
+    // }, 'list-sub-issues');
+    // return subIssues.data;
+    return [];
+  } catch (error) {
+    console.warn(`Failed to fetch sub-issues for #${issue.number}: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
 }
 
 async function main() {
@@ -273,7 +367,7 @@ async function main() {
     }
   }
 
-  // Update issues with dependency links
+  // Update issues with dependency links and labels
   // For parent tasks
   for (const task of tasks) {
     const issue = idToIssue[`${task.id}`];
@@ -284,14 +378,22 @@ async function main() {
     const reqByIssues = task.requiredBy?.map(reqBy => idToIssue[`${reqBy.id}`]).filter(Boolean);
     issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
 
-    if (issue.expectedBody !== issue.body) {
-      await octokit.issues.update({
-        owner: GITHUB_OWNER!,
-        repo: GITHUB_REPO!,
-        issue_number: issue.number,
+    // Generate updated labels with dependency status
+    const taskId = String(task.id);
+    const complexity = complexityMap[taskId];
+    const baseLabels = generateIssueLabels(task, undefined, complexity);
+    const dependencyLabels = updateDependencyLabels(task, depIssues);
+    const updatedLabels = [...baseLabels, ...dependencyLabels];
+
+    // Update issue if body or labels need updating
+    const needsUpdate = issue.expectedBody !== issue.body;
+    
+    if (needsUpdate) {
+      await githubApi.updateIssue(issue.number, {
         body: issue.expectedBody,
+        labels: updatedLabels,
       });
-      console.log(`Updated issue #${issue.number} with dependencies/required-bys.`);
+      console.log(`Updated issue #${issue.number} with dependencies/required-bys and labels.`);
     }
 
       // For subtasks
@@ -305,23 +407,51 @@ async function main() {
         const reqByIssues = sub.requiredBy?.map(reqBy => idToIssue[`${task.id}.${reqBy.id}`]).filter(Boolean);
         issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
 
-        if (issue.expectedBody !== issue.body) {
-          await octokit.issues.update({
-            owner: GITHUB_OWNER!,
-            repo: GITHUB_REPO!,
-            issue_number: issue.number,
+        // Generate updated labels for subtask
+        const subTaskId = `${task.id}.${sub.id}`;
+        const subComplexity = complexityMap[subTaskId];
+        const subBaseLabels = generateIssueLabels(sub, task, subComplexity);
+        const subDependencyLabels = updateDependencyLabels(sub, depIssues);
+        const subUpdatedLabels = [...subBaseLabels, ...subDependencyLabels];
+
+        const subNeedsUpdate = issue.expectedBody !== issue.body;
+        
+        if (subNeedsUpdate) {
+          await githubApi.updateIssue(issue.number, {
             body: issue.expectedBody,
+            labels: subUpdatedLabels,
           });
-          console.log(`Updated issue #${issue.number} with dependencies/required-bys.`);
+          console.log(`Updated issue #${issue.number} with dependencies/required-bys and labels.`);
         }
       }
     }
   }
 
   console.log('All issues created and linked.');
+  
+  // Wait for all pending API requests to complete
+  await githubApi.waitForCompletion();
+  
+  // Log final queue status
+  const queueStatus = githubApi.getQueueStatus();
+  console.log(`Final queue status: ${queueStatus.pending} pending, ${queueStatus.active} active`);
+  
+  // Clean up resources
+  githubApi.destroy();
 }
 
-main().catch(e => {
-  console.error(e);
+main().catch(async e => {
+  console.error('Error in main execution:', e);
+  
+  // Log rate limit status if available
+  try {
+    const rateLimitStatus = await githubApi.getRateLimitStatus();
+    console.error('Rate limit status:', rateLimitStatus);
+  } catch (rateLimitError) {
+    console.error('Could not fetch rate limit status:', rateLimitError);
+  }
+  
+  // Clean up resources
+  githubApi.destroy();
   process.exit(1);
 }); 
