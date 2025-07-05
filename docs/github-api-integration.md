@@ -1,6 +1,6 @@
 # Enhanced GitHub API Integration
 
-This document describes the enhanced GitHub API integration implemented for issue #230, providing robust GitHub API operations with comprehensive error handling, rate limiting, and concurrency management.
+This document describes the enhanced GitHub API integration implemented for issue #230 and further enhanced for issue #237, providing robust GitHub API operations with comprehensive error handling, rate limiting, concurrency management, and advanced failure recovery mechanisms.
 
 ## Overview
 
@@ -8,9 +8,12 @@ The enhanced GitHub API integration provides:
 
 - **Rate Limiting Handling**: Automatic detection and handling of GitHub API rate limits with exponential backoff
 - **Comprehensive Error Handling**: Categorized error handling with intelligent retry strategies
+- **Circuit Breaker Pattern**: Prevents cascading failures and provides automatic recovery
+- **Structured Error Logging**: Detailed error reporting with aggregation and monitoring
+- **Health Monitoring**: Real-time API health status and recovery tracking
+- **Fallback Mechanisms**: Graceful degradation strategies for various failure scenarios
 - **Idempotency Checks**: Improved duplicate detection using GitHub's search API
 - **Concurrent Request Management**: Proper queuing and concurrency control for API requests
-- **Detailed Logging**: Comprehensive logging and recovery mechanisms
 
 ## Key Features
 
@@ -56,6 +59,68 @@ export enum GitHubErrorCategory {
 - Maximum retry limits to prevent infinite loops
 - Different backoff strategies per error category
 
+### 3. Circuit Breaker Pattern
+
+Prevents cascading failures when API is consistently failing:
+
+```typescript
+export enum CircuitBreakerState {
+  CLOSED = 'closed',     // Normal operation
+  OPEN = 'open',         // Circuit open, requests failing fast
+  HALF_OPEN = 'half_open' // Testing if service recovered
+}
+```
+
+**Circuit Breaker Features:**
+- Configurable failure thresholds (default: 5 consecutive failures)
+- Automatic recovery testing with half-open state
+- Fast-fail for requests when circuit is open
+- Intelligent timeout management (default: 30 seconds)
+- Separate handling for different error types
+
+### 4. Structured Error Logging and Aggregation
+
+Comprehensive error tracking for monitoring and debugging:
+
+```typescript
+interface ErrorStats {
+  errorsByCategory: Record<GitHubErrorCategory, number>;
+  recentErrorRate: number;
+  lastErrorTime: number;
+  consecutiveFailures: number;
+  totalRequests: number;
+  successRate: number;
+}
+```
+
+**Logging Features:**
+- JSON-structured error logs with detailed context
+- Error aggregation with periodic reporting
+- Real-time error rate monitoring
+- Success rate tracking
+- Recent error history for debugging
+
+### 5. Health Monitoring and Status
+
+Real-time API health monitoring:
+
+```typescript
+interface HealthStatus {
+  circuitState: CircuitBreakerState;
+  isHealthy: boolean;
+  rateLimitStatus: RateLimitInfo | null;
+  errorStats: ErrorStats;
+  lastSuccessTime: number;
+}
+```
+
+**Health Features:**
+- Comprehensive health status reporting
+- Circuit breaker state monitoring
+- Rate limit status tracking
+- Error statistics and trends
+- Recovery time tracking
+
 ### 3. Concurrent Request Management
 
 Request queue system manages API concurrency:
@@ -98,6 +163,8 @@ async findExistingIssue(title: string, uniqueMarker?: string): Promise<ApiIssue 
 
 The enhanced API client supports comprehensive configuration:
 
+### Basic Configuration
+
 ```typescript
 const githubApi = createGitHubApiClient({
   token: GITHUB_TOKEN,
@@ -107,6 +174,31 @@ const githubApi = createGitHubApiClient({
   retryDelay: 1000,        // Base retry delay (ms)
   maxRetries: 3,           // Max retry attempts
   debug: false             // Enable debug logging
+});
+```
+
+### Advanced Configuration with Enhanced Error Handling
+
+```typescript
+const githubApi = createGitHubApiClient({
+  token: GITHUB_TOKEN,
+  owner: GITHUB_OWNER,
+  repo: GITHUB_REPO,
+  maxConcurrent: 3,
+  retryDelay: 1000,
+  maxRetries: 3,
+  debug: true,
+  
+  // Circuit breaker configuration
+  circuitBreaker: {
+    failureThreshold: 5,    // Open circuit after 5 consecutive failures
+    successThreshold: 3,    // Close circuit after 3 consecutive successes  
+    timeout: 30000         // Wait 30s before trying half-open state
+  },
+  
+  // Enhanced error handling
+  structuredLogging: true,  // Enable JSON-structured error logs
+  errorAggregation: true   // Enable error statistics and monitoring
 });
 ```
 
@@ -163,12 +255,57 @@ try {
 
 ## Monitoring and Debugging
 
-### Queue Status Monitoring
+### Enhanced Queue Status Monitoring
 
 ```typescript
 const status = githubApi.getQueueStatus();
 console.log(`Queue: ${status.pending} pending, ${status.active} active`);
 console.log(`Rate limited: ${status.rateLimited}`);
+console.log(`Circuit state: ${status.circuitState}`);
+console.log(`Consecutive failures: ${status.consecutiveFailures}`);
+
+// Get comprehensive health status
+const health = status.healthStatus;
+console.log(`API Health: ${health.isHealthy ? 'Healthy' : 'Unhealthy'}`);
+console.log(`Success rate: ${health.errorStats.successRate.toFixed(2)}%`);
+console.log(`Recent error rate: ${health.errorStats.recentErrorRate} errors/min`);
+```
+
+### Health Status Monitoring
+
+```typescript
+// Get detailed health information
+const health = githubApi.getHealthStatus();
+
+if (!health.isHealthy) {
+  console.warn('GitHub API health degraded:', {
+    circuitState: health.circuitState,
+    errorRate: health.errorStats.recentErrorRate,
+    lastSuccess: new Date(health.lastSuccessTime).toISOString()
+  });
+  
+  // Check recent errors
+  const recentErrors = githubApi.getRecentErrors(5); // Last 5 minutes
+  console.log('Recent errors:', recentErrors.map(e => ({
+    category: e.category,
+    message: e.message,
+    time: new Date(e.timestamp).toISOString()
+  })));
+}
+```
+
+### Circuit Breaker Management
+
+```typescript
+// Check if circuit breaker is open
+const status = githubApi.getQueueStatus();
+if (status.circuitState === 'open') {
+  console.log('Circuit breaker is open - API requests are failing fast');
+  
+  // Optionally reset circuit breaker for testing
+  githubApi.resetCircuitBreaker();
+  console.log('Circuit breaker manually reset');
+}
 ```
 
 ### Rate Limit Status
@@ -192,12 +329,32 @@ const githubApi = createGitHubApiClient({
 
 ## Error Recovery
 
-The system provides several recovery mechanisms:
+The system provides comprehensive recovery mechanisms:
 
-1. **Automatic Retry**: Retryable errors are automatically retried with exponential backoff
-2. **Queue Persistence**: Operations remain in queue during rate limit periods
-3. **Graceful Degradation**: Non-critical failures don't block other operations
-4. **Resource Cleanup**: Proper cleanup of timers and resources on shutdown
+### 1. Circuit Breaker Pattern
+- **Fail Fast**: When API is consistently failing, circuit opens to prevent cascading failures
+- **Automatic Recovery**: Circuit transitions to half-open state to test service recovery
+- **Configurable Thresholds**: Customizable failure/success thresholds and timeout periods
+
+### 2. Intelligent Retry Logic
+- **Exponential Backoff**: Progressive delays with jitter to avoid thundering herd
+- **Category-Based Retries**: Different retry strategies based on error type
+- **Respect Rate Limits**: Honor `Retry-After` headers and rate limit resets
+
+### 3. Graceful Degradation
+- **Non-blocking Operations**: Failures in one operation don't affect others
+- **Queue Persistence**: Operations remain queued during temporary failures
+- **Resource Management**: Proper cleanup of timers and connections
+
+### 4. Structured Error Reporting
+- **Error Aggregation**: Collect and analyze error patterns over time
+- **Health Monitoring**: Real-time tracking of API health and recovery status
+- **Debugging Support**: Detailed error logs with context for troubleshooting
+
+### 5. Fallback Mechanisms
+- **Circuit Breaker**: Fast-fail when service is down to preserve resources
+- **Rate Limit Handling**: Automatic queuing and delayed retry during rate limits
+- **Network Resilience**: Retry on network-level errors with appropriate backoff
 
 ## Performance Considerations
 

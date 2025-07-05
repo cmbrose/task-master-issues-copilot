@@ -33,6 +33,12 @@ export interface GitHubApiConfig {
   maxRetries?: number;
   /** Enable debug logging (default: false) */
   debug?: boolean;
+  /** Circuit breaker configuration */
+  circuitBreaker?: Partial<CircuitBreakerConfig>;
+  /** Enable structured error logging (default: true) */
+  structuredLogging?: boolean;
+  /** Enable error aggregation (default: true) */
+  errorAggregation?: boolean;
 }
 
 /**
@@ -63,6 +69,15 @@ export enum GitHubErrorCategory {
 }
 
 /**
+ * Circuit breaker states for API health management
+ */
+export enum CircuitBreakerState {
+  CLOSED = 'closed',     // Normal operation
+  OPEN = 'open',         // Circuit open, requests failing fast
+  HALF_OPEN = 'half_open' // Testing if service recovered
+}
+
+/**
  * Detailed error information
  */
 export interface GitHubApiError extends Error {
@@ -71,6 +86,52 @@ export interface GitHubApiError extends Error {
   rateLimitInfo?: RateLimitInfo;
   retryAfter?: number;
   retryable: boolean;
+}
+
+/**
+ * Circuit breaker configuration and state
+ */
+export interface CircuitBreakerConfig {
+  /** Failure threshold to open circuit (default: 5) */
+  failureThreshold: number;
+  /** Success threshold to close circuit (default: 3) */
+  successThreshold: number;
+  /** Timeout before attempting half-open (default: 30000ms) */
+  timeout: number;
+}
+
+/**
+ * Error statistics for monitoring and alerting
+ */
+export interface ErrorStats {
+  /** Total number of errors by category */
+  errorsByCategory: Record<GitHubErrorCategory, number>;
+  /** Recent error rate (errors per minute) */
+  recentErrorRate: number;
+  /** Last error timestamp */
+  lastErrorTime: number;
+  /** Consecutive failures count */
+  consecutiveFailures: number;
+  /** Total requests made */
+  totalRequests: number;
+  /** Success rate percentage */
+  successRate: number;
+}
+
+/**
+ * Health status of the API client
+ */
+export interface HealthStatus {
+  /** Current circuit breaker state */
+  circuitState: CircuitBreakerState;
+  /** Whether API is currently healthy */
+  isHealthy: boolean;
+  /** Current rate limit status */
+  rateLimitStatus: RateLimitInfo | null;
+  /** Error statistics */
+  errorStats: ErrorStats;
+  /** Last successful request timestamp */
+  lastSuccessTime: number;
 }
 
 /**
@@ -94,14 +155,62 @@ export class EnhancedGitHubApi {
   private activeRequests = 0;
   private rateLimitInfo: RateLimitInfo | null = null;
   private rateLimitResetTimer: NodeJS.Timeout | null = null;
+  
+  // Circuit breaker state
+  private circuitBreakerState: CircuitBreakerState = CircuitBreakerState.CLOSED;
+  private circuitBreakerConfig: Required<CircuitBreakerConfig>;
+  private consecutiveFailures = 0;
+  private consecutiveSuccesses = 0;
+  private circuitOpenTime = 0;
+  
+  // Error tracking and statistics
+  private errorStats: ErrorStats = {
+    errorsByCategory: {
+      [GitHubErrorCategory.RATE_LIMITED]: 0,
+      [GitHubErrorCategory.NETWORK]: 0,
+      [GitHubErrorCategory.AUTH]: 0,
+      [GitHubErrorCategory.NOT_FOUND]: 0,
+      [GitHubErrorCategory.VALIDATION]: 0,
+      [GitHubErrorCategory.SERVER]: 0,
+      [GitHubErrorCategory.UNKNOWN]: 0
+    },
+    recentErrorRate: 0,
+    lastErrorTime: 0,
+    consecutiveFailures: 0,
+    totalRequests: 0,
+    successRate: 100
+  };
+  private lastSuccessTime = Date.now();
+  
+  // Error aggregation for structured logging
+  private errorBuffer: Array<{
+    timestamp: number;
+    category: GitHubErrorCategory;
+    message: string;
+    operation: string;
+    retryCount: number;
+  }> = [];
 
   constructor(config: GitHubApiConfig) {
+    const { circuitBreaker = {}, ...baseConfig } = config;
+    
     this.config = {
       maxConcurrent: 3,
       retryDelay: 1000,
       maxRetries: 3,
       debug: false,
-      ...config
+      structuredLogging: true,
+      errorAggregation: true,
+      circuitBreaker: {},
+      ...baseConfig
+    };
+
+    // Initialize circuit breaker configuration
+    this.circuitBreakerConfig = {
+      failureThreshold: 5,
+      successThreshold: 3,
+      timeout: 30000,
+      ...circuitBreaker
     };
 
     this.octokit = new Octokit({ 
@@ -117,6 +226,11 @@ export class EnhancedGitHubApi {
         }
       }
     });
+
+    // Start error aggregation if enabled
+    if (this.config.errorAggregation) {
+      this.startErrorAggregation();
+    }
   }
 
   /**
@@ -146,11 +260,33 @@ export class EnhancedGitHubApi {
   }
 
   /**
-   * Process the request queue with concurrency control
+   * Process the request queue with concurrency control and circuit breaker
    */
   private async processQueue(): Promise<void> {
     if (this.activeRequests >= this.config.maxConcurrent || this.requestQueue.length === 0) {
       return;
+    }
+
+    // Check circuit breaker state
+    if (this.circuitBreakerState === CircuitBreakerState.OPEN) {
+      const timeSinceOpen = Date.now() - this.circuitOpenTime;
+      if (timeSinceOpen < this.circuitBreakerConfig.timeout) {
+        this.log(`Circuit breaker is OPEN. Failing fast for ${Math.ceil((this.circuitBreakerConfig.timeout - timeSinceOpen) / 1000)}s`);
+        const item = this.requestQueue.shift();
+        if (item) {
+          const circuitError = new Error('Circuit breaker is open - API appears to be down') as GitHubApiError;
+          circuitError.category = GitHubErrorCategory.SERVER;
+          circuitError.retryable = false;
+          item.reject(circuitError);
+          this.recordError(circuitError, item.category, item.retryCount);
+        }
+        return;
+      } else {
+        // Transition to half-open to test if service recovered
+        this.circuitBreakerState = CircuitBreakerState.HALF_OPEN;
+        this.consecutiveSuccesses = 0;
+        this.log('Circuit breaker transitioning to HALF_OPEN - testing service recovery');
+      }
     }
 
     // Check if we're rate limited
@@ -167,9 +303,11 @@ export class EnhancedGitHubApi {
     if (!item) return;
 
     this.activeRequests++;
+    this.errorStats.totalRequests++;
     
     try {
       const result = await this.executeOperation(item);
+      this.recordSuccess(item.category);
       item.resolve(result);
     } catch (error) {
       const shouldRetry = await this.handleError(error as Error, item);
@@ -202,18 +340,29 @@ export class EnhancedGitHubApi {
   }
 
   /**
-   * Handle API errors with categorization and retry logic
+   * Handle API errors with categorization, retry logic, and circuit breaker
    */
   private async handleError(error: Error, item: QueueItem): Promise<boolean> {
     const apiError = this.categorizeError(error);
+    
+    // Record error for statistics and monitoring
+    this.recordError(apiError, item.category, item.retryCount);
+    
     this.log(`API error in ${item.category}: ${apiError.message} (category: ${apiError.category})`);
 
     // Update retry count
     item.retryCount++;
 
-    // Check if we should retry
+    // Check if we should retry based on error type and circuit breaker state
     if (!apiError.retryable || item.retryCount >= this.config.maxRetries) {
       this.log(`Not retrying ${item.category} after ${item.retryCount} attempts`);
+      return false;
+    }
+
+    // In half-open state, be more conservative about retries
+    if (this.circuitBreakerState === CircuitBreakerState.HALF_OPEN && 
+        apiError.category !== GitHubErrorCategory.RATE_LIMITED) {
+      this.log(`Circuit breaker is HALF_OPEN - not retrying ${item.category} to avoid reopening circuit`);
       return false;
     }
 
@@ -468,11 +617,21 @@ export class EnhancedGitHubApi {
   /**
    * Get queue status for monitoring
    */
-  getQueueStatus(): { pending: number; active: number; rateLimited: boolean } {
+  getQueueStatus(): { 
+    pending: number; 
+    active: number; 
+    rateLimited: boolean;
+    circuitState: CircuitBreakerState;
+    consecutiveFailures: number;
+    healthStatus: HealthStatus;
+  } {
     return {
       pending: this.requestQueue.length,
       active: this.activeRequests,
-      rateLimited: this.rateLimitInfo?.isLimited || false
+      rateLimited: this.rateLimitInfo?.isLimited || false,
+      circuitState: this.circuitBreakerState,
+      consecutiveFailures: this.consecutiveFailures,
+      healthStatus: this.getHealthStatus()
     };
   }
 
@@ -493,6 +652,198 @@ export class EnhancedGitHubApi {
       clearTimeout(this.rateLimitResetTimer);
       this.rateLimitResetTimer = null;
     }
+  }
+
+  /**
+   * Record a successful operation and update circuit breaker state
+   */
+  private recordSuccess(category: string): void {
+    this.lastSuccessTime = Date.now();
+    this.consecutiveFailures = 0;
+    this.errorStats.consecutiveFailures = 0;
+    
+    // Update success rate
+    const totalSuccesses = this.errorStats.totalRequests - Object.values(this.errorStats.errorsByCategory).reduce((a, b) => a + b, 0);
+    this.errorStats.successRate = this.errorStats.totalRequests > 0 ? (totalSuccesses / this.errorStats.totalRequests) * 100 : 100;
+
+    // Circuit breaker state management
+    if (this.circuitBreakerState === CircuitBreakerState.HALF_OPEN) {
+      this.consecutiveSuccesses++;
+      if (this.consecutiveSuccesses >= this.circuitBreakerConfig.successThreshold) {
+        this.circuitBreakerState = CircuitBreakerState.CLOSED;
+        this.consecutiveSuccesses = 0;
+        this.log('Circuit breaker closed - service recovered');
+      }
+    }
+
+    this.log(`Successful ${category} operation - circuit state: ${this.circuitBreakerState}`);
+  }
+
+  /**
+   * Record an error and update circuit breaker state
+   */
+  private recordError(error: GitHubApiError, category: string, retryCount: number): void {
+    const now = Date.now();
+    this.errorStats.lastErrorTime = now;
+    this.errorStats.errorsByCategory[error.category]++;
+    
+    // Only count as consecutive failure if it's a final failure (not being retried)
+    if (!error.retryable || retryCount >= this.config.maxRetries) {
+      this.consecutiveFailures++;
+      this.errorStats.consecutiveFailures++;
+    }
+
+    // Update error rate (errors per minute)
+    const oneMinuteAgo = now - 60000;
+    const recentErrors = this.errorBuffer.filter(e => e.timestamp > oneMinuteAgo).length;
+    this.errorStats.recentErrorRate = recentErrors;
+
+    // Update success rate
+    const totalErrors = Object.values(this.errorStats.errorsByCategory).reduce((a, b) => a + b, 0);
+    this.errorStats.successRate = this.errorStats.totalRequests > 0 ? ((this.errorStats.totalRequests - totalErrors) / this.errorStats.totalRequests) * 100 : 100;
+
+    // Add to error buffer for aggregation
+    if (this.config.errorAggregation) {
+      this.errorBuffer.push({
+        timestamp: now,
+        category: error.category,
+        message: error.message,
+        operation: category,
+        retryCount
+      });
+      
+      // Keep only last 100 errors to prevent memory leak
+      if (this.errorBuffer.length > 100) {
+        this.errorBuffer = this.errorBuffer.slice(-100);
+      }
+    }
+
+    // Circuit breaker logic for non-rate-limit errors
+    if (error.category !== GitHubErrorCategory.RATE_LIMITED && 
+        error.category !== GitHubErrorCategory.AUTH) {
+      
+      if (this.circuitBreakerState === CircuitBreakerState.CLOSED) {
+        if (this.consecutiveFailures >= this.circuitBreakerConfig.failureThreshold) {
+          this.circuitBreakerState = CircuitBreakerState.OPEN;
+          this.circuitOpenTime = now;
+          this.log(`Circuit breaker opened due to ${this.consecutiveFailures} consecutive failures`);
+        }
+      } else if (this.circuitBreakerState === CircuitBreakerState.HALF_OPEN) {
+        // Any failure in half-open state reopens the circuit
+        this.circuitBreakerState = CircuitBreakerState.OPEN;
+        this.circuitOpenTime = now;
+        this.consecutiveSuccesses = 0;
+        this.log('Circuit breaker reopened due to failure in half-open state');
+      }
+    }
+
+    // Structured error logging
+    if (this.config.structuredLogging) {
+      this.logStructuredError(error, category, retryCount);
+    }
+  }
+
+  /**
+   * Log structured error information for monitoring
+   */
+  private logStructuredError(error: GitHubApiError, operation: string, retryCount: number): void {
+    const errorLog = {
+      timestamp: new Date().toISOString(),
+      level: 'error',
+      service: 'github-api',
+      operation,
+      error: {
+        category: error.category,
+        message: error.message,
+        status: error.status,
+        retryable: error.retryable,
+        retryCount,
+        stack: error.stack
+      },
+      circuitState: this.circuitBreakerState,
+      consecutiveFailures: this.consecutiveFailures,
+      rateLimited: this.rateLimitInfo?.isLimited || false
+    };
+
+    if (this.config.debug) {
+      console.error(JSON.stringify(errorLog, null, 2));
+    } else {
+      console.error(JSON.stringify(errorLog));
+    }
+  }
+
+  /**
+   * Start error aggregation for periodic reporting
+   */
+  private startErrorAggregation(): void {
+    setInterval(() => {
+      if (this.errorBuffer.length > 0) {
+        const oneMinuteAgo = Date.now() - 60000;
+        const recentErrors = this.errorBuffer.filter(e => e.timestamp > oneMinuteAgo);
+        
+        if (recentErrors.length > 0) {
+          const errorSummary = {
+            timestamp: new Date().toISOString(),
+            level: 'info',
+            service: 'github-api-stats',
+            recentErrorCount: recentErrors.length,
+            errorsByCategory: recentErrors.reduce((acc, error) => {
+              acc[error.category] = (acc[error.category] || 0) + 1;
+              return acc;
+            }, {} as Record<string, number>),
+            circuitState: this.circuitBreakerState,
+            healthStatus: this.getHealthStatus()
+          };
+
+          if (this.config.debug) {
+            console.log(JSON.stringify(errorSummary, null, 2));
+          }
+        }
+      }
+    }, 60000); // Report every minute
+  }
+
+  /**
+   * Get comprehensive health status of the API client
+   */
+  getHealthStatus(): HealthStatus {
+    const now = Date.now();
+    const isHealthy = this.circuitBreakerState !== CircuitBreakerState.OPEN &&
+                     this.errorStats.recentErrorRate < 10 &&
+                     (now - this.lastSuccessTime) < 300000; // Last success within 5 minutes
+
+    return {
+      circuitState: this.circuitBreakerState,
+      isHealthy,
+      rateLimitStatus: this.rateLimitInfo,
+      errorStats: { ...this.errorStats },
+      lastSuccessTime: this.lastSuccessTime
+    };
+  }
+
+  /**
+   * Get recent error reports for debugging
+   */
+  getRecentErrors(minutes: number = 5): Array<{
+    timestamp: number;
+    category: GitHubErrorCategory;
+    message: string;
+    operation: string;
+    retryCount: number;
+  }> {
+    const cutoff = Date.now() - (minutes * 60000);
+    return this.errorBuffer.filter(error => error.timestamp > cutoff);
+  }
+
+  /**
+   * Reset circuit breaker state manually (for testing or recovery)
+   */
+  resetCircuitBreaker(): void {
+    this.circuitBreakerState = CircuitBreakerState.CLOSED;
+    this.consecutiveFailures = 0;
+    this.consecutiveSuccesses = 0;
+    this.circuitOpenTime = 0;
+    this.log('Circuit breaker manually reset');
   }
 }
 
