@@ -11,8 +11,18 @@ Generates task graphs and GitHub issues from PRD (Product Requirements Document)
 **Key Features:**
 - Parses PRD files using Taskmaster CLI
 - Creates hierarchical GitHub issues with dependencies
-- Uploads task graph artifacts
+- Uploads task graph artifacts with structured metadata
 - Configurable complexity thresholds and recursion depth
+- Comprehensive artifact metadata including task counts, hierarchy depth, and file statistics
+
+**Artifact Metadata:**
+- `prd_version` - Version extracted from PRD file
+- `generation_timestamp` - ISO timestamp of generation
+- `complexity_threshold` - Task complexity threshold used
+- `max_depth` - Maximum recursion depth used  
+- `total_tasks` - Total count of all tasks and subtasks
+- `leaf_tasks_count` - Count of tasks without subtasks
+- `task_hierarchy_depth` - Maximum depth of task hierarchy
 
 ### taskmaster-breakdown
 Provides on-demand breakdown of GitHub issues into sub-tasks via slash commands.
