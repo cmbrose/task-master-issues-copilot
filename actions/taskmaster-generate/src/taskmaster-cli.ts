@@ -9,6 +9,7 @@ import * as core from '@actions/core';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
+import { parseTaskGraphJson, extractTasksForGitHub, calculateTaskComplexity, type TaskGraph } from '../../../scripts/index';
 import { downloadBinary, BinaryDownloadOptions, BinaryInfo, TaskmasterConfig, loadFromEnvironment } from '../../../scripts/index';
 
 /**
@@ -403,27 +404,114 @@ export function validateTaskGraph(taskGraphPath: string): boolean {
     }
 
     const content = fs.readFileSync(taskGraphPath, 'utf8');
-    const taskGraph = JSON.parse(content);
-
-    // Basic validation of expected structure
-    if (!taskGraph || typeof taskGraph !== 'object') {
-      core.error('Task graph is not a valid JSON object');
+    
+    // Use enhanced JSON parsing with schema validation
+    const parseResult = parseTaskGraphJson(content);
+    
+    if (parseResult.errors.length > 0) {
+      core.error('❌ Task graph validation failed:');
+      
+      if (parseResult.parseErrors.length > 0) {
+        core.error('JSON Parse Errors:');
+        parseResult.parseErrors.forEach((error: string) => core.error(`  - ${error}`));
+      }
+      
+      if (parseResult.validationErrors.length > 0) {
+        core.error('Schema Validation Errors:');
+        parseResult.validationErrors.forEach((error: string) => core.error(`  - ${error}`));
+      }
+      
       return false;
     }
 
-    // Check for essential properties (adjust based on actual Taskmaster CLI output)
-    const requiredFields = ['tasks', 'metadata'];
-    for (const field of requiredFields) {
-      if (!(field in taskGraph)) {
-        core.warning(`Task graph missing expected field: ${field}`);
-      }
+    if (!parseResult.data) {
+      core.error('❌ Task graph validation failed: No data returned');
+      return false;
     }
 
-    core.info('✅ Task graph validation completed');
+    const taskGraph = parseResult.data;
+    
+    // Log validation success and task graph info
+    core.info('✅ Task graph JSON parsing and schema validation completed');
+    
+    const complexity = calculateTaskComplexity(taskGraph);
+    core.info(`📊 Task Graph Analysis:`);
+    core.info(`   - Total tasks: ${complexity.totalTasks}`);
+    core.info(`   - Max depth: ${complexity.maxDepth}`);
+    core.info(`   - Average subtasks: ${complexity.averageSubtasks.toFixed(1)}`);
+    core.info(`   - Complexity score: ${complexity.complexityScore}/10`);
+    
+    // Test GitHub API data extraction
+    const githubData = extractTasksForGitHub(taskGraph);
+    if (githubData.errors.length > 0) {
+      core.warning('⚠️ Issues found during GitHub API data extraction:');
+      githubData.errors.forEach((error: string) => core.warning(`  - ${error}`));
+    } else {
+      core.info(`✅ Successfully extracted ${githubData.tasks.length} tasks for GitHub API`);
+    }
+
     return true;
   } catch (error) {
     core.error(`Task graph validation failed: ${error instanceof Error ? error.message : String(error)}`);
     return false;
+  }
+}
+
+/**
+ * Parse task graph JSON with comprehensive validation and GitHub API data extraction
+ */
+export function parseAndValidateTaskGraph(taskGraphPath: string): {
+  success: boolean;
+  taskGraph?: TaskGraph;
+  githubTasks?: ReturnType<typeof extractTasksForGitHub>['tasks'];
+  errors: string[];
+} {
+  const errors: string[] = [];
+
+  try {
+    if (!fs.existsSync(taskGraphPath)) {
+      errors.push(`Task graph file not found: ${taskGraphPath}`);
+      return { success: false, errors };
+    }
+
+    const content = fs.readFileSync(taskGraphPath, 'utf8');
+    
+    // Parse and validate task graph JSON
+    const parseResult = parseTaskGraphJson(content);
+    
+    if (parseResult.errors.length > 0) {
+      errors.push('Task graph validation failed:');
+      errors.push(...parseResult.parseErrors.map((e: string) => `Parse Error: ${e}`));
+      errors.push(...parseResult.validationErrors.map((e: string) => `Validation Error: ${e}`));
+      return { success: false, errors };
+    }
+
+    if (!parseResult.data) {
+      errors.push('Task graph parsing succeeded but no data was returned');
+      return { success: false, errors };
+    }
+
+    const taskGraph = parseResult.data;
+    
+    // Extract GitHub API compatible data
+    const githubData = extractTasksForGitHub(taskGraph);
+    
+    if (githubData.errors.length > 0) {
+      errors.push('GitHub API data extraction had issues:');
+      errors.push(...githubData.errors);
+      // Continue with partial success since parsing worked
+    }
+
+    return {
+      success: true,
+      taskGraph,
+      githubTasks: githubData.tasks,
+      errors
+    };
+
+  } catch (error) {
+    errors.push(`Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
+    return { success: false, errors };
   }
 }
 

@@ -84,11 +84,18 @@ export {
   sanitizeOutput,
   validateOutput,
   convertFormat,
+  validateTaskGraphSchema,
+  parseTaskGraphJson,
+  extractTasksForGitHub,
+  calculateTaskComplexity,
   type OutputFormat,
   type OutputValidationResult,
   type OutputValidationOptions,
   type FormatConversionOptions,
-  type ConversionResult
+  type ConversionResult,
+  type Task,
+  type TaskGraph,
+  type GitHubTaskData
 } from './output-validation';
 
 // Export output processing integration utilities

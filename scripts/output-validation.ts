@@ -8,12 +8,72 @@
  * - Format conversion between supported formats
  * - Error handling for malformed output
  * - Output sanitization and validation rules
+ * - Task graph schema validation and data extraction
  */
 
 /**
  * Supported output formats
  */
 export type OutputFormat = 'json' | 'xml' | 'text';
+
+/**
+ * Task interface matching the expected Taskmaster output structure
+ */
+export interface Task {
+  id: number;
+  title: string;
+  description: string;
+  details?: string;
+  testStrategy?: string;
+  priority?: string;
+  dependencies?: number[];
+  status?: string;
+  subtasks?: Task[];
+  // Added by processing logic
+  requiredBy?: Task[];
+}
+
+/**
+ * Task graph schema for Taskmaster CLI output
+ */
+export interface TaskGraph {
+  /** Array of root tasks */
+  tasks: Task[];
+  /** Metadata about the task generation */
+  metadata: {
+    version?: string;
+    generatedAt?: string;
+    source?: string;
+    complexity?: number;
+    totalTasks?: number;
+    [key: string]: any;
+  };
+}
+
+/**
+ * GitHub API compatible task data
+ */
+export interface GitHubTaskData {
+  /** GitHub issue title */
+  title: string;
+  /** GitHub issue body content */
+  body: string;
+  /** Labels to apply to the issue */
+  labels: string[];
+  /** Assignees for the issue */
+  assignees?: string[];
+  /** Milestone to assign */
+  milestone?: number;
+  /** Task metadata for tracking */
+  metadata: {
+    taskId: number;
+    parentTaskId?: number;
+    complexity?: number;
+    dependencies: number[];
+    subtaskIds: number[];
+    [key: string]: any;
+  };
+}
 
 /**
  * Validation result for output format parsing
@@ -128,6 +188,302 @@ export function parseJsonOutput(output: string): { data?: any; errors: string[] 
     errors.push(`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
     return { errors };
   }
+}
+
+/**
+ * Validate task graph schema
+ */
+export function validateTaskGraphSchema(data: any): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!data || typeof data !== 'object') {
+    errors.push('Task graph must be a valid object');
+    return { valid: false, errors };
+  }
+
+  // Check for required top-level properties
+  if (!Array.isArray(data.tasks)) {
+    errors.push('Task graph must have a "tasks" array');
+  }
+
+  if (!data.metadata || typeof data.metadata !== 'object') {
+    errors.push('Task graph must have a "metadata" object');
+  }
+
+  // Validate tasks array
+  if (Array.isArray(data.tasks)) {
+    data.tasks.forEach((task: any, index: number) => {
+      const taskErrors = validateTaskSchema(task, `tasks[${index}]`);
+      errors.push(...taskErrors);
+    });
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate individual task schema
+ */
+function validateTaskSchema(task: any, path: string): string[] {
+  const errors: string[] = [];
+
+  if (!task || typeof task !== 'object') {
+    errors.push(`${path}: Task must be an object`);
+    return errors;
+  }
+
+  // Required fields
+  if (typeof task.id !== 'number') {
+    errors.push(`${path}: Task must have a numeric "id"`);
+  }
+
+  if (!task.title || typeof task.title !== 'string') {
+    errors.push(`${path}: Task must have a string "title"`);
+  }
+
+  if (!task.description || typeof task.description !== 'string') {
+    errors.push(`${path}: Task must have a string "description"`);
+  }
+
+  // Optional fields validation
+  if (task.dependencies && !Array.isArray(task.dependencies)) {
+    errors.push(`${path}: dependencies must be an array`);
+  } else if (Array.isArray(task.dependencies)) {
+    task.dependencies.forEach((dep: any, i: number) => {
+      if (typeof dep !== 'number') {
+        errors.push(`${path}: dependencies[${i}] must be a number`);
+      }
+    });
+  }
+
+  if (task.subtasks && !Array.isArray(task.subtasks)) {
+    errors.push(`${path}: subtasks must be an array`);
+  } else if (Array.isArray(task.subtasks)) {
+    task.subtasks.forEach((subtask: any, i: number) => {
+      const subtaskErrors = validateTaskSchema(subtask, `${path}.subtasks[${i}]`);
+      errors.push(...subtaskErrors);
+    });
+  }
+
+  return errors;
+}
+
+/**
+ * Parse and validate task graph JSON with enhanced error handling
+ */
+export function parseTaskGraphJson(output: string): { 
+  data?: TaskGraph; 
+  errors: string[]; 
+  parseErrors: string[];
+  validationErrors: string[];
+} {
+  const parseErrors: string[] = [];
+  const validationErrors: string[] = [];
+  const allErrors: string[] = [];
+
+  try {
+    // First, attempt basic JSON parsing
+    const parseResult = parseJsonOutput(output);
+    
+    if (parseResult.errors.length > 0) {
+      parseErrors.push(...parseResult.errors);
+      allErrors.push(...parseResult.errors);
+      return { 
+        errors: allErrors, 
+        parseErrors, 
+        validationErrors 
+      };
+    }
+
+    const parsedData = parseResult.data;
+
+    // Then validate against task graph schema
+    const validationResult = validateTaskGraphSchema(parsedData);
+    
+    if (!validationResult.valid) {
+      validationErrors.push(...validationResult.errors);
+      allErrors.push(...validationResult.errors);
+      return { 
+        errors: allErrors, 
+        parseErrors, 
+        validationErrors 
+      };
+    }
+
+    // If validation passes, return the data as TaskGraph
+    return {
+      data: parsedData as TaskGraph,
+      errors: [],
+      parseErrors: [],
+      validationErrors: []
+    };
+
+  } catch (error) {
+    const errorMessage = `Unexpected error during task graph parsing: ${error instanceof Error ? error.message : String(error)}`;
+    parseErrors.push(errorMessage);
+    allErrors.push(errorMessage);
+    return { 
+      errors: allErrors, 
+      parseErrors, 
+      validationErrors 
+    };
+  }
+}
+
+/**
+ * Extract tasks for GitHub API consumption
+ */
+export function extractTasksForGitHub(taskGraph: TaskGraph): {
+  tasks: GitHubTaskData[];
+  errors: string[];
+} {
+  const tasks: GitHubTaskData[] = [];
+  const errors: string[] = [];
+
+  try {
+    if (!taskGraph.tasks || !Array.isArray(taskGraph.tasks)) {
+      errors.push('Task graph must contain a tasks array');
+      return { tasks, errors };
+    }
+
+    // Process each root task
+    taskGraph.tasks.forEach((task, index) => {
+      try {
+        const githubTask = convertTaskToGitHubData(task);
+        tasks.push(githubTask);
+
+        // Process subtasks if they exist
+        if (task.subtasks && Array.isArray(task.subtasks)) {
+          task.subtasks.forEach((subtask) => {
+            try {
+              const githubSubtask = convertTaskToGitHubData(subtask, task.id);
+              tasks.push(githubSubtask);
+            } catch (error) {
+              errors.push(`Failed to convert subtask ${subtask.id} of task ${task.id}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          });
+        }
+      } catch (error) {
+        errors.push(`Failed to convert task ${index}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+
+    return { tasks, errors };
+  } catch (error) {
+    errors.push(`Failed to extract tasks: ${error instanceof Error ? error.message : String(error)}`);
+    return { tasks, errors };
+  }
+}
+
+/**
+ * Convert a task to GitHub API compatible data
+ */
+function convertTaskToGitHubData(task: Task, parentTaskId?: number): GitHubTaskData {
+  // Build issue title
+  const title = `[${task.id}] ${task.title}`;
+
+  // Build issue body
+  let body = `## Details\n${task.description}`;
+  
+  if (task.details) {
+    body += `\n\n${task.details}`;
+  }
+
+  if (task.testStrategy) {
+    body += `\n\n## Test Strategy\n${task.testStrategy}`;
+  }
+
+  // Add dependencies section
+  if (task.dependencies && task.dependencies.length > 0) {
+    body += '\n\n## Dependencies\n';
+    task.dependencies.forEach(depId => {
+      body += `- [ ] #${depId}\n`;
+    });
+  }
+
+  // Add metadata section
+  body += '\n\n## Meta';
+  body += `\n- **Status:** \`${task.status || 'pending'}\``;
+  
+  if (parentTaskId) {
+    body += `\n- **Parent Task:** #${parentTaskId}`;
+  }
+
+  if (task.priority) {
+    body += `\n- **Priority:** \`${task.priority}\``;
+  }
+
+  // Determine labels
+  const labels = ['taskmaster'];
+  if (task.priority) {
+    labels.push(`priority:${task.priority}`);
+  }
+  if (task.status) {
+    labels.push(`status:${task.status}`);
+  }
+  if (parentTaskId) {
+    labels.push('subtask');
+  }
+
+  // Extract subtask IDs
+  const subtaskIds = task.subtasks ? task.subtasks.map(st => st.id) : [];
+
+  return {
+    title,
+    body,
+    labels,
+    metadata: {
+      taskId: task.id,
+      parentTaskId,
+      dependencies: task.dependencies || [],
+      subtaskIds,
+    }
+  };
+}
+
+/**
+ * Calculate task complexity from task graph
+ */
+export function calculateTaskComplexity(taskGraph: TaskGraph): {
+  totalTasks: number;
+  maxDepth: number;
+  averageSubtasks: number;
+  complexityScore: number;
+} {
+  let totalTasks = 0;
+  let maxDepth = 0;
+  let totalSubtasks = 0;
+  let tasksWithSubtasks = 0;
+
+  function analyzeTask(task: Task, depth: number = 0): void {
+    totalTasks++;
+    maxDepth = Math.max(maxDepth, depth);
+
+    if (task.subtasks && task.subtasks.length > 0) {
+      totalSubtasks += task.subtasks.length;
+      tasksWithSubtasks++;
+      
+      task.subtasks.forEach(subtask => {
+        analyzeTask(subtask, depth + 1);
+      });
+    }
+  }
+
+  taskGraph.tasks.forEach(task => analyzeTask(task));
+
+  const averageSubtasks = tasksWithSubtasks > 0 ? totalSubtasks / tasksWithSubtasks : 0;
+  const complexityScore = Math.min(10, Math.round(
+    (totalTasks * 0.3) + 
+    (maxDepth * 2) + 
+    (averageSubtasks * 1.5)
+  ));
+
+  return {
+    totalTasks,
+    maxDepth,
+    averageSubtasks,
+    complexityScore
+  };
 }
 
 /**
