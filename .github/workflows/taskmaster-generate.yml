@@ -10,6 +10,13 @@ on:
       - main
       - master
 
+  # Pull request trigger for dry-run mode
+  pull_request:
+    paths:
+      - 'docs/**.prd.md'
+      - 'docs/**/*.prd.md'
+    types: [opened, synchronize, reopened]
+
   # Manual dispatch for testing and one-off runs
   workflow_dispatch:
     inputs:
@@ -42,6 +49,7 @@ on:
 permissions:
   issues: write
   contents: read
+  pull-requests: write
 
 jobs:
   generate:
@@ -55,6 +63,15 @@ jobs:
       - name: Log Trigger Information
         run: |
           echo "🚀 Taskmaster Generate triggered by: ${{ github.event_name }}"
+          
+          # Determine if this is a dry-run
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "🎯 Running in DRY-RUN mode - no issues will be created"
+            echo "DRY_RUN=true" >> $GITHUB_ENV
+          else
+            echo "DRY_RUN=false" >> $GITHUB_ENV
+          fi
+          
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "👤 Triggered manually by: ${{ github.actor }}"
             echo "⚙️ Parameters:"
@@ -63,9 +80,14 @@ jobs:
             echo "  • Max depth: ${{ inputs.max-depth }}"
             echo "  • Taskmaster version: ${{ inputs.taskmaster-version }}"
             echo "  • Force download: ${{ inputs.force-download }}"
-          else
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
             echo "📝 PRD files changed in commit: ${{ github.sha }}"
             echo "👤 Committed by: ${{ github.event.head_commit.author.name }}"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "🔀 Pull request #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}"
+            echo "👤 Opened by: ${{ github.event.pull_request.user.login }}"
+            echo "📄 Base branch: ${{ github.event.pull_request.base.ref }}"
+            echo "📄 Head branch: ${{ github.event.pull_request.head.ref }}"
           fi
 
       - name: Run Taskmaster Generate
@@ -79,6 +101,11 @@ jobs:
           taskmaster-version: ${{ github.event_name == 'workflow_dispatch' && inputs.taskmaster-version || '1.0.0' }}
           force-download: ${{ github.event_name == 'workflow_dispatch' && inputs.force-download || false }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          TASKMASTER_DRY_RUN: ${{ env.DRY_RUN }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_PR_TITLE: ${{ github.event.pull_request.title }}
 
       - name: Upload Task Graph Artifact
         if: steps.taskmaster-generate.outputs.task-graph
@@ -93,9 +120,15 @@ jobs:
           echo "## 📊 Taskmaster Generate Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry-run Mode**: ${{ env.DRY_RUN }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Task Graph**: ${{ steps.taskmaster-generate.outputs.task-graph && 'Generated and uploaded as artifact' || 'Not generated' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Issues Created**: ${{ steps.taskmaster-generate.outputs.issues-created || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ env.DRY_RUN }}" == "true" ]]; then
+            echo "🎯 **DRY-RUN MODE**: This execution analyzed PRD changes without creating or modifying issues." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
           
           if [[ "${{ steps.taskmaster-generate.outputs.task-graph-generated }}" == "true" ]]; then
             echo "✅ Task graph generation completed successfully" >> $GITHUB_STEP_SUMMARY
