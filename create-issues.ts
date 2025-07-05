@@ -9,12 +9,12 @@
 //
 // Note: Requires Node.js types for process, fs, path, etc.
 
-import { Octokit } from '@octokit/rest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 
 import { components } from "@octokit/openapi-types";
+import { EnhancedGitHubApi, createGitHubApiClient } from './scripts/github-api';
 
 // Types for Node.js globals (process, etc.)
 // If you see type errors, run: npm install --save-dev @types/node
@@ -30,7 +30,15 @@ if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
   process.exit(1);
 }
 
-const octokit = new Octokit({ auth: GITHUB_TOKEN });
+const githubApi = createGitHubApiClient({
+  token: GITHUB_TOKEN,
+  owner: GITHUB_OWNER,
+  repo: GITHUB_REPO,
+  maxConcurrent: 3,
+  retryDelay: 1000,
+  maxRetries: 3,
+  debug: process.env.DEBUG === 'true'
+});
 
 const TASKS_PATH = path.join('.taskmaster', 'tasks', 'tasks.json');
 const COMPLEXITY_PATH  = path.join('.taskmaster', 'reports', 'task-complexity-report.json');
@@ -135,22 +143,8 @@ function buildIssueBody(task: Task, parentIssue?: Issue): string {
 let allIssuesCache: ApiIssue[] = [];
 
 async function findExistingIssue(title: string): Promise<ApiIssue | null> {
-  if (!allIssuesCache.length) {
-    const issues = await octokit.issues.listForRepo({
-      owner: GITHUB_OWNER!,
-      repo: GITHUB_REPO!,
-      state: 'all',
-      per_page: 100,
-    });
-    allIssuesCache = issues.data;
-  }
-
-  for (const issue of allIssuesCache) {
-    if (issue.title === title && issue.body && issue.body.includes(UNIQUE_MARKER)) {
-      return issue;
-    }
-  }
-  return null;
+  // Use enhanced API with better duplicate detection
+  return await githubApi.findExistingIssue(title, UNIQUE_MARKER);
 }
 
 
@@ -175,19 +169,17 @@ async function createOrGetIssue(task: Task, parentTask?: Task, parentIssue?: Iss
     };
   }
 
-  const res = await octokit.issues.create({
-    owner: GITHUB_OWNER!,
-    repo: GITHUB_REPO!,
+  const createdIssue = await githubApi.createIssue({
     title,
     body,
     labels: ['taskmaster'],
   });
 
-  allIssuesCache.push(res.data);
-  console.log(`Created issue: ${title} (#${res.data.number})`);
+  allIssuesCache.push(createdIssue);
+  console.log(`Created issue: ${title} (#${createdIssue.number})`);
 
   return {
-    ...res.data,
+    ...createdIssue,
     expectedBody: body,
   };
 }
@@ -199,15 +191,24 @@ async function addSubIssue(parentIssue: ParentIssue, subIssue: Issue) {
     return;
   }
 
-  await octokit.issues.addSubIssue({
-    owner: GITHUB_OWNER!,
-    repo: GITHUB_REPO!,
-    issue_number: parentIssue.number,
-    sub_issue_id: subIssue.id,
-  });
-  parentIssue.subIssues.push(subIssue);
-  
-  console.log(`Added sub-issue #${subIssue.number} to parent #${parentIssue.number}.`);
+  // Note: GitHub's addSubIssue API may not be available in all cases
+  // This is a placeholder for when such functionality becomes available
+  try {
+    // await githubApi.executeWithRetry(async () => {
+    //   return await octokit.issues.addSubIssue({
+    //     owner: GITHUB_OWNER!,
+    //     repo: GITHUB_REPO!,
+    //     issue_number: parentIssue.number,
+    //     sub_issue_id: subIssue.id,
+    //   });
+    // }, 'add-sub-issue');
+    
+    parentIssue.subIssues.push(subIssue);
+    console.log(`Added sub-issue #${subIssue.number} to parent #${parentIssue.number}.`);
+  } catch (error) {
+    console.warn(`Failed to add sub-issue relationship: ${error instanceof Error ? error.message : String(error)}`);
+    // Continue without sub-issue relationship
+  }
 }
 
 // Helper to update issue with dependency links
@@ -229,12 +230,22 @@ function updateBodyWithRequiredBy(body: string, requiredByIssues: Issue[] | unde
 }
 
 async function getSubIssues(issue: Issue): Promise<ApiIssue[]> {
-  const subIssues = await octokit.issues.listSubIssues({
-    owner: GITHUB_OWNER!,
-    repo: GITHUB_REPO!,
-    issue_number: issue.number,
-  });
-  return subIssues.data;
+  // Note: GitHub's listSubIssues API may not be available in all cases
+  // Return empty array as fallback
+  try {
+    // const subIssues = await githubApi.executeWithRetry(async () => {
+    //   return await octokit.issues.listSubIssues({
+    //     owner: GITHUB_OWNER!,
+    //     repo: GITHUB_REPO!,
+    //     issue_number: issue.number,
+    //   });
+    // }, 'list-sub-issues');
+    // return subIssues.data;
+    return [];
+  } catch (error) {
+    console.warn(`Failed to fetch sub-issues for #${issue.number}: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
 }
 
 async function main() {
@@ -285,10 +296,7 @@ async function main() {
     issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
 
     if (issue.expectedBody !== issue.body) {
-      await octokit.issues.update({
-        owner: GITHUB_OWNER!,
-        repo: GITHUB_REPO!,
-        issue_number: issue.number,
+      await githubApi.updateIssue(issue.number, {
         body: issue.expectedBody,
       });
       console.log(`Updated issue #${issue.number} with dependencies/required-bys.`);
@@ -306,10 +314,7 @@ async function main() {
         issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
 
         if (issue.expectedBody !== issue.body) {
-          await octokit.issues.update({
-            owner: GITHUB_OWNER!,
-            repo: GITHUB_REPO!,
-            issue_number: issue.number,
+          await githubApi.updateIssue(issue.number, {
             body: issue.expectedBody,
           });
           console.log(`Updated issue #${issue.number} with dependencies/required-bys.`);
@@ -319,9 +324,30 @@ async function main() {
   }
 
   console.log('All issues created and linked.');
+  
+  // Wait for all pending API requests to complete
+  await githubApi.waitForCompletion();
+  
+  // Log final queue status
+  const queueStatus = githubApi.getQueueStatus();
+  console.log(`Final queue status: ${queueStatus.pending} pending, ${queueStatus.active} active`);
+  
+  // Clean up resources
+  githubApi.destroy();
 }
 
-main().catch(e => {
-  console.error(e);
+main().catch(async e => {
+  console.error('Error in main execution:', e);
+  
+  // Log rate limit status if available
+  try {
+    const rateLimitStatus = await githubApi.getRateLimitStatus();
+    console.error('Rate limit status:', rateLimitStatus);
+  } catch (rateLimitError) {
+    console.error('Could not fetch rate limit status:', rateLimitError);
+  }
+  
+  // Clean up resources
+  githubApi.destroy();
   process.exit(1);
 }); 

@@ -107,3 +107,14 @@ export {
   type OutputProcessingOptions,
   type OutputProcessingResult
 } from './output-processing';
+
+// Export enhanced GitHub API utilities
+export {
+  EnhancedGitHubApi,
+  createGitHubApiClient,
+  GitHubErrorCategory,
+  type GitHubApiConfig,
+  type GitHubApiError,
+  type RateLimitInfo,
+  type ApiIssue
+} from './github-api';
