@@ -1,10 +1,21 @@
 # Trigger Configuration Guide
 
-This document explains the comprehensive trigger configuration for the Taskmaster GitHub Actions workflow.
+This document explains the comprehensive trigger configuration for the Taskmaster GitHub Actions workflows.
 
 ## Overview
 
-The Taskmaster workflow (`taskmaster.yml`) supports multiple trigger types with automatic mode detection and input validation. The workflow adapts its behavior based on how it was triggered.
+The Taskmaster system includes both a comprehensive workflow (`taskmaster.yml`) and dedicated specialized workflows for specific webhook events. Each workflow supports multiple trigger types with automatic mode detection and input validation.
+
+## Workflow Types
+
+### Comprehensive Workflow (`taskmaster.yml`)
+The main workflow that supports all trigger types and automatically detects the appropriate action mode.
+
+### Dedicated Webhook Workflows
+Specialized workflows for specific webhook events:
+- **`taskmaster-breakdown.yml`**: Handles `/breakdown` command comments
+- **`taskmaster-watcher.yml`**: Handles issue closure events and dependency scanning
+- **`taskmaster-generate.yml`**: Handles PRD file changes for issue generation
 
 ## Trigger Types
 
@@ -220,6 +231,88 @@ jobs:
     scan-mode: ${{ github.event_name == 'schedule' && 'full' || 'webhook' }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
+
+## Dedicated Webhook Workflows
+
+### taskmaster-breakdown.yml
+
+Handles `/breakdown` commands in issue comments for on-demand task decomposition.
+
+**Trigger Configuration:**
+```yaml
+on:
+  issue_comment:
+    types: [created]
+```
+
+**Event Filtering:**
+- Only processes comments starting with `/breakdown`
+- Supports command arguments: `--depth N`, `--threshold X`, `max-depth=N`, `complexity=N`
+- Validates argument ranges (depth: 1-5, threshold: 1-100)
+
+**Usage Examples:**
+```
+/breakdown
+/breakdown --depth 3 --threshold 50
+/breakdown max-depth=2 complexity=30
+```
+
+**Features:**
+- Automatic argument parsing and validation
+- Thumbs-up/down reactions based on success/failure
+- Comprehensive logging and payload handling
+- Idempotent operation (safe to run multiple times)
+
+### taskmaster-watcher.yml
+
+Monitors issue changes and automatically updates dependency status.
+
+**Trigger Configuration:**
+```yaml
+on:
+  issues:
+    types: [closed, reopened]
+  schedule:
+    - cron: '*/10 9-18 * * 1-5'  # Business hours
+    - cron: '0 * * * *'          # Off-hours
+  workflow_dispatch:
+    inputs:
+      scan-mode:
+        type: choice
+        options: ['webhook', 'full']
+```
+
+**Operation Modes:**
+- **Webhook Mode**: Processes specific issue events for real-time updates
+- **Full Scan Mode**: Comprehensive scan of all open issues for batch processing
+- **Scheduled Mode**: Automatic dependency resolution every 10 minutes during business hours
+
+**Features:**
+- Automatic `blocked` label removal when dependencies are resolved
+- Median latency < 15 minutes for dependency resolution
+- Supports both event-driven and scheduled processing
+- Comprehensive error handling and logging
+
+### taskmaster-generate.yml
+
+Handles PRD file changes for automatic issue generation.
+
+**Trigger Configuration:**
+```yaml
+on:
+  push:
+    paths: ['docs/**.prd.md']
+    branches: [main, master]
+  pull_request:
+    paths: ['docs/**.prd.md']
+    types: [opened, synchronize, reopened]
+```
+
+**Features:**
+- Automatic issue creation from PRD file changes
+- Dry-run mode for pull requests (preview without creating issues)
+- Task graph generation and artifact upload
+- Hierarchical issue creation with dependency linking
 
 ## Security Considerations
 
