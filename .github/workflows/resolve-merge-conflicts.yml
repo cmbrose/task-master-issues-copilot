@@ -87,10 +87,12 @@ jobs:
               --fragment $file \
               --schema "success bool" \
               --system "You are a merge conflict resolver. Use the provided tools to resolve the conflict. Report success or failure" \
-              "Resolve conflicts in $file" \
-              | jq '.success')
+              "Resolve conflicts in $file")
 
-            if [ "$result" != "true" ]; then
+            echo "Result: $result"
+            success=$(echo $result | jq -r .success)
+
+            if [ "$success" != "true" ]; then
               echo "Failed to resolve conflict in $file. Exiting."
               exit 1
             fi
