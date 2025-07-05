@@ -3,6 +3,45 @@ description: 'Watch for issue changes and update dependencies/blocked status'
 author: 'Taskmaster Team'
 
 inputs:
+  # Repository checkout configuration
+  repository:
+    description: 'Repository name (owner/repo) to checkout. Defaults to current repository'
+    required: false
+    default: ''
+  ref:
+    description: 'The branch, tag or SHA to checkout. Defaults to default branch'
+    required: false
+    default: ''
+  checkout-token:
+    description: 'GitHub token for repository checkout. Uses github-token if not specified'
+    required: false
+    default: ''
+  ssh-key:
+    description: 'SSH private key for repository access'
+    required: false
+    default: ''
+  fetch-depth:
+    description: 'Number of commits to fetch. 0 = all history, 1 = shallow clone'
+    required: false
+    default: '1'
+  checkout-path:
+    description: 'Relative path where the repository will be placed'
+    required: false
+    default: ''
+  clean:
+    description: 'Whether to execute git clean before fetching'
+    required: false
+    default: 'true'
+  persist-credentials:
+    description: 'Whether to persist credentials for later git operations'
+    required: false
+    default: 'true'
+  skip-checkout:
+    description: 'Skip repository checkout (assumes repository is already checked out)'
+    required: false
+    default: 'false'
+  
+  # Taskmaster configuration
   github-token:
     description: 'GitHub token for API access'
     required: true
@@ -20,6 +59,19 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Checkout Repository
+      if: inputs.skip-checkout != 'true'
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.repository != '' && inputs.repository || github.repository }}
+        ref: ${{ inputs.ref }}
+        token: ${{ inputs.checkout-token != '' && inputs.checkout-token || inputs.github-token }}
+        ssh-key: ${{ inputs.ssh-key }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+        path: ${{ inputs.checkout-path }}
+        clean: ${{ inputs.clean }}
+        persist-credentials: ${{ inputs.persist-credentials }}
+    
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:

@@ -246,6 +246,7 @@ jobs:
         id: taskmaster
         uses: ./
         with:
+          skip-checkout: 'true'
           complexity-threshold: ${{ github.event_name == 'workflow_dispatch' && inputs.complexity-threshold || '40' }}
           max-depth: ${{ github.event_name == 'workflow_dispatch' && inputs.max-depth || '3' }}
           prd-path-glob: ${{ github.event_name == 'workflow_dispatch' && inputs.prd-path-glob || 'docs/**.prd.md' }}
