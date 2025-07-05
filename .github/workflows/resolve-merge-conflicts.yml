@@ -113,11 +113,3 @@ jobs:
           git add .
           git commit -am "Merge conflicts"
           git push
-
-      - name: Post conflict comment to PR
-        if: steps.merge.outcome == 'success' || steps.merge.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ secrets.ISSUE_ASSIGNMENT_PAT }}
-        run: |
-          PR_NUMBER="${{ steps.prinfo.outputs.pr_number }}"
-          gh pr comment $PR_NUMBER --body-file conflict_report.md
