@@ -9,6 +9,7 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 import * as fs from 'fs';
 import * as path from 'path';
+import { DefaultArtifactClient } from '@actions/artifact';
 import { setupTaskmasterCli, getTaskmasterConfigFromInputs, runTaskmasterCli, validateTaskGraph } from './taskmaster-cli';
 import { loadConfig, TaskmasterConfig } from '@scripts/index';
 import { createGitHubApiClient, EnhancedGitHubApi } from '@scripts/github-api';
@@ -40,6 +41,184 @@ interface TaskGraph {
 }
 
 const UNIQUE_MARKER = '<!-- created-by-taskmaster-script -->';
+
+/**
+ * Calculate task hierarchy depth recursively
+ */
+function calculateTaskHierarchyDepth(tasks: Task[]): number {
+  let maxDepth = 0;
+  
+  for (const task of tasks) {
+    let currentDepth = 1;
+    if (task.subtasks && task.subtasks.length > 0) {
+      currentDepth = 1 + calculateTaskHierarchyDepth(task.subtasks);
+    }
+    maxDepth = Math.max(maxDepth, currentDepth);
+  }
+  
+  return maxDepth;
+}
+
+/**
+ * Count leaf tasks (tasks without subtasks)
+ */
+function countLeafTasks(tasks: Task[]): number {
+  let leafCount = 0;
+  
+  for (const task of tasks) {
+    if (!task.subtasks || task.subtasks.length === 0) {
+      leafCount++;
+    } else {
+      leafCount += countLeafTasks(task.subtasks);
+    }
+  }
+  
+  return leafCount;
+}
+
+/**
+ * Count total tasks including subtasks
+ */
+function countTotalTasks(tasks: Task[]): number {
+  let totalCount = tasks.length;
+  
+  for (const task of tasks) {
+    if (task.subtasks && task.subtasks.length > 0) {
+      totalCount += countTotalTasks(task.subtasks);
+    }
+  }
+  
+  return totalCount;
+}
+
+/**
+ * Get artifact size validation
+ */
+function getArtifactSizeInfo(filePath: string): { sizeBytes: number; sizeKB: number; sizeMB: number } {
+  const stats = fs.statSync(filePath);
+  const sizeBytes = stats.size;
+  return {
+    sizeBytes,
+    sizeKB: Math.round(sizeBytes / 1024 * 100) / 100,
+    sizeMB: Math.round(sizeBytes / (1024 * 1024) * 100) / 100
+  };
+}
+
+/**
+ * Upload task graph as artifact with structured metadata
+ */
+async function uploadTaskGraphArtifact(
+  taskGraphPath: string, 
+  config: TaskmasterConfig,
+  prdFilePath: string
+): Promise<void> {
+  core.info('📤 Uploading task graph as artifact with metadata...');
+  
+  try {
+    // Read and parse task graph for metadata
+    const taskGraphContent = fs.readFileSync(taskGraphPath, 'utf8');
+    const taskGraph: TaskGraph = JSON.parse(taskGraphContent);
+    
+    // Get file size information
+    const sizeInfo = getArtifactSizeInfo(taskGraphPath);
+    
+    // Calculate metadata
+    const totalTasks = countTotalTasks(taskGraph.tasks || []);
+    const leafTasksCount = countLeafTasks(taskGraph.tasks || []);
+    const taskHierarchyDepth = calculateTaskHierarchyDepth(taskGraph.tasks || []);
+    const generationTimestamp = new Date().toISOString();
+    
+    // Extract PRD version from file if possible
+    let prdVersion = 'unknown';
+    try {
+      const prdContent = fs.readFileSync(prdFilePath, 'utf8');
+      const versionMatch = prdContent.match(/version:\s*([^\n\r]+)/i);
+      if (versionMatch) {
+        prdVersion = versionMatch[1].trim();
+      }
+    } catch (error) {
+      core.warning(`Could not extract PRD version: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
+    // Prepare metadata
+    const metadata = {
+      prd_version: prdVersion,
+      generation_timestamp: generationTimestamp,
+      complexity_threshold: config.complexityThreshold.toString(),
+      max_depth: config.maxDepth.toString(),
+      total_tasks: totalTasks.toString(),
+      leaf_tasks_count: leafTasksCount.toString(),
+      task_hierarchy_depth: taskHierarchyDepth.toString(),
+      file_size_bytes: sizeInfo.sizeBytes.toString(),
+      file_size_kb: sizeInfo.sizeKB.toString(),
+      file_size_mb: sizeInfo.sizeMB.toString(),
+      prd_file_path: prdFilePath
+    };
+    
+    // Log metadata for transparency
+    core.info('📊 Task Graph Metadata:');
+    core.info(`  • PRD Version: ${metadata.prd_version}`);
+    core.info(`  • Generation Timestamp: ${metadata.generation_timestamp}`);
+    core.info(`  • Complexity Threshold: ${metadata.complexity_threshold}`);
+    core.info(`  • Max Depth: ${metadata.max_depth}`);
+    core.info(`  • Total Tasks: ${metadata.total_tasks}`);
+    core.info(`  • Leaf Tasks Count: ${metadata.leaf_tasks_count}`);
+    core.info(`  • Task Hierarchy Depth: ${metadata.task_hierarchy_depth}`);
+    core.info(`  • File Size: ${sizeInfo.sizeMB} MB (${sizeInfo.sizeBytes} bytes)`);
+    
+    // Validate artifact size
+    const maxSizeMB = 100; // GitHub artifact size limit consideration
+    if (sizeInfo.sizeMB > maxSizeMB) {
+      core.warning(`⚠️ Artifact size (${sizeInfo.sizeMB} MB) exceeds recommended limit of ${maxSizeMB} MB`);
+    } else {
+      core.info(`✅ Artifact size validation passed: ${sizeInfo.sizeMB} MB`);
+    }
+    
+    // Create artifact client
+    const artifactClient = new DefaultArtifactClient();
+    
+    // Upload artifact
+    const artifactName = 'task-graph';
+    const files = [taskGraphPath];
+    const rootDirectory = path.dirname(taskGraphPath);
+    
+    const uploadResponse = await artifactClient.uploadArtifact(
+      artifactName,
+      files,
+      rootDirectory,
+      {
+        retentionDays: 30 // Keep artifacts for 30 days
+      }
+    );
+    
+    // Log upload success
+    core.info(`✅ Artifact upload successful:`);
+    core.info(`  • Artifact Name: ${artifactName}`);
+    core.info(`  • Files Uploaded: ${uploadResponse.size || 'unknown'} bytes`);
+    core.info(`  • Upload ID: ${uploadResponse.id || 'unknown'}`);
+    core.info(`  • Upload URL: Available in GitHub Actions UI`);
+    
+    // Set outputs for other steps
+    if (uploadResponse.id) {
+      core.setOutput('artifact-id', uploadResponse.id.toString());
+    }
+    core.setOutput('artifact-name', artifactName);
+    if (uploadResponse.size) {
+      core.setOutput('artifact-size', uploadResponse.size.toString());
+    }
+    
+    // Export metadata as outputs for potential use by other actions
+    Object.entries(metadata).forEach(([key, value]) => {
+      core.setOutput(`metadata-${key.replace(/_/g, '-')}`, value);
+    });
+    
+  } catch (error) {
+    const errorMessage = `Failed to upload artifact: ${error instanceof Error ? error.message : String(error)}`;
+    core.error(`❌ Artifact upload failed: ${errorMessage}`);
+    core.setFailed(errorMessage);
+    throw error;
+  }
+}
 
 /**
  * Find PRD files matching the given glob pattern
@@ -530,7 +709,7 @@ async function run(): Promise<void> {
         complexityThreshold: config.complexityThreshold,
         maxDepth: config.maxDepth,
         outputPath: taskGraphPath,
-        additionalArgs: config.taskmasterArgs ? config.taskmasterArgs.split(' ').filter(arg => arg.trim()) : [],
+        additionalArgs: config.taskmasterArgs ? config.taskmasterArgs.split(' ').filter((arg: string) => arg.trim()) : [],
         // Enhanced options for better reliability
         retryAttempts: 2,
         retryDelay: 1000,
@@ -558,6 +737,14 @@ async function run(): Promise<void> {
         const taskGraph = JSON.parse(taskGraphContent);
         const taskCount = taskGraph.tasks ? taskGraph.tasks.length : 0;
         core.info(`📊 Generated task graph with ${taskCount} tasks`);
+        
+        // Upload task graph as artifact with metadata
+        try {
+          await uploadTaskGraphArtifact(runResult.taskGraphPath, config, prdFile);
+        } catch (artifactError) {
+          // Log error but don't fail the entire action
+          core.warning(`Artifact upload failed but continuing with issue creation: ${artifactError instanceof Error ? artifactError.message : String(artifactError)}`);
+        }
         
         // Parse task graph and create GitHub issues
         const githubToken = config.githubToken;
