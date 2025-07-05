@@ -1,0 +1,58 @@
+name: Dependency Resolver - Cron Scheduling
+
+on:
+  # Scheduled runs every 10 minutes to scan for closed issues and remove blocked labels
+  schedule:
+    # Every 10 minutes - scan for closed issues and update dependent tasks
+    - cron: '*/10 * * * *'
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  dependency-resolver:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log Scheduled Run
+        run: |
+          echo "🔍 Dependency Resolver: Scheduled scan for closed issues"
+          echo "⏰ Triggered at: $(date -u)"
+          echo "🎯 Scanning all open issues for dependency resolution"
+
+      - name: Run Taskmaster Watcher
+        uses: ./actions/taskmaster-watcher
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          scan-mode: 'full'
+        id: watcher
+
+      - name: Report Results
+        run: |
+          echo "📊 Dependency Resolution Results:"
+          echo "  • Issues updated: ${{ steps.watcher.outputs.issues-updated }}"
+          echo "  • Dependencies resolved: ${{ steps.watcher.outputs.dependencies-resolved }}"
+          
+          if [[ "${{ steps.watcher.outputs.issues-updated }}" -gt 0 ]]; then
+            echo "✅ Successfully updated ${{ steps.watcher.outputs.issues-updated }} issues"
+          else
+            echo "ℹ️ No issues required updates at this time"
+          fi
+          
+          if [[ "${{ steps.watcher.outputs.dependencies-resolved }}" -gt 0 ]]; then
+            echo "🎉 Resolved ${{ steps.watcher.outputs.dependencies-resolved }} dependency chains"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## 🔍 Dependency Resolution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: Scheduled scan (every 10 minutes)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scan Mode**: Full scan of all open issues" >> $GITHUB_STEP_SUMMARY
+          echo "- **Issues Updated**: ${{ steps.watcher.outputs.issues-updated }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dependencies Resolved**: ${{ steps.watcher.outputs.dependencies-resolved }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "This scheduled workflow automatically scans for closed issues and removes 'blocked' labels from dependent tasks." >> $GITHUB_STEP_SUMMARY
