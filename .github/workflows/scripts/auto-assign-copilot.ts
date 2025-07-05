@@ -25,13 +25,13 @@ function normalizeBody(body: string | undefined | null): string {
 }
 
 function parseRequiredBy(body: string): number[] {
-  const match = body.match(/- Required By:\n([\s\S]+?)(?:\n\S|$)/);
+  const match = body.match(/- Required By:([\s\S]+?)(?:\n\S|$)/);
   if (!match) return [];
   return Array.from(match[1].matchAll(/#(\d+)/g)).map(m => Number(m[1]));
 }
 
 function parseDependencies(body: string): number[] {
-  const match = body.match(/## Dependencies\n([\s\S]+?)(?:\n\S|$)/);
+  const match = body.match(/## Dependencies([\s\S]+?)(?:\n\S|$)/);
   if (!match) return [];
   return Array.from(match[1].matchAll(/#(\d+)/g)).map(m => Number(m[1]));
 }
@@ -123,7 +123,7 @@ async function assignCopilotViaGraphQL(issueNumber: number) {
 async function checkAndAssignCopilot(issueNumber: number) {
   const { data: reqIssue } = await octokit.issues.get({ owner, repo, issue_number: issueNumber });
   const body = normalizeBody(reqIssue.body);
-  const dependencies = parseDependencies(body || "");
+  const dependencies = parseDependencies(body);
   const allDepsClosed = await Promise.all(dependencies.map(isClosed)).then(arr => arr.every(Boolean));
   const subIssues = await getSubIssues(issueNumber);
   const allSubsClosed = await Promise.all(subIssues.map(isClosed)).then(arr => arr.every(Boolean));
