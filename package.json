@@ -17,8 +17,10 @@
         "test:dependency-tracking": "npx ts-node test/test-dependency-tracking.ts",
         "test:blocked-status": "npx ts-node test/test-blocked-status.ts",
         "test:enhanced-error-handling": "npx ts-node test/test-simple-enhanced.ts",
+        "test:e2e-hierarchy": "npx ts-node test/test-e2e-issue-hierarchy.ts",
+        "test:integration-hierarchy": "./test/test-integration-hierarchy.sh",
         "test:yaml-parser": "./test/test-yaml-parser.sh",
-        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && npm run test:issue-creation && npm run test:yaml-parser && npm run test:sub-issues-api && npm run test:dependency-tracking && npm run test:blocked-status && npm run test:enhanced-error-handling"
+        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && npm run test:issue-creation && npm run test:yaml-parser && npm run test:sub-issues-api && npm run test:dependency-tracking && npm run test:blocked-status && npm run test:enhanced-error-handling && npm run test:e2e-hierarchy && npm run test:integration-hierarchy"
     },
     "dependencies": {
         "@actions/core": "^1.10.1",
