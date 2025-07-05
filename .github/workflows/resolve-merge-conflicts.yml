@@ -69,16 +69,18 @@ jobs:
         continue-on-error: true
         run: |
           git merge "origin/${{ steps.prinfo.outputs.head_branch }}" || true
-          CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
-          if [ -z "$CONFLICT_FILES" ]; then
-            echo "No merge conflicts detected."
-            exit 0
-          fi
-          echo "$CONFLICT_FILES" > conflict_files.txt
+          git diff --name-only --diff-filter=U > conflict_files.txt
 
       - name: Handle Merge Conflicts
-        if: steps.merge.outcome == 'success' || steps.merge.outcome == 'failure'
         run: |
+          if [ ! -s conflict_files.txt ]; then
+            echo "No merge conflicts detected. Exiting."
+            exit 0
+          fi
+
+          echo "Files to fix:"
+          cat conflict_files.txt
+
           while read file; do
             if [ "$file" == 'package-lock.json' ]; then
               # Handle package.lock manually by just deleting it and reinstalling at the end
