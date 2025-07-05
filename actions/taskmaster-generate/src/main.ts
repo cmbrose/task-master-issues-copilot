@@ -13,6 +13,7 @@ import { setupTaskmasterCli, getTaskmasterConfigFromInputs, runTaskmasterCli, va
 import { loadConfig, TaskmasterConfig } from '@scripts/index';
 import { createGitHubApiClient, EnhancedGitHubApi } from '@scripts/github-api';
 import { components } from "@octokit/openapi-types";
+import { DependencyGraph, createDependencyGraphFromTasks, CycleDetectionResult } from '@scripts/dependency-graph';
 
 // GitHub API types
 type ApiIssue = components["schemas"]["issue"];
@@ -353,6 +354,26 @@ async function parseTaskGraphAndCreateIssues(taskGraphPath: string, githubToken:
       }
     }
   }
+
+  // Validate dependency graph and detect cycles
+  core.info('🔍 Analyzing task dependency graph...');
+  const taskDependencyGraph = createDependencyGraphFromTasks(tasks);
+  
+  const cycleResult = taskDependencyGraph.detectCycles();
+  if (cycleResult.hasCycle) {
+    const cycleDescription = cycleResult.cycle?.join(' → ') || 'unknown cycle';
+    core.setFailed(`❌ Circular dependency detected: ${cycleDescription}`);
+    throw new Error(`Circular dependency detected: ${cycleDescription}`);
+  }
+  
+  const resolutionOrder = taskDependencyGraph.getResolutionOrder();
+  core.info(`✅ Dependency graph is valid. Resolution order: ${resolutionOrder.order.join(' → ')}`);
+  core.info(`📊 Dependency levels: ${resolutionOrder.levels.length} (tasks can be parallelized within levels)`);
+  
+  // Log dependency levels for better visibility
+  resolutionOrder.levels.forEach((level, index) => {
+    core.info(`  Level ${index + 1}: ${level.join(', ')}`);
+  });
 
   const idToIssue: Record<string, Issue> = {};
   let issuesCreated = 0;

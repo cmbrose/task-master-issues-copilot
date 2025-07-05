@@ -70,6 +70,7 @@ var fs = require("fs");
 var path = require("path");
 var dotenv = require("dotenv");
 var github_api_1 = require("./scripts/github-api");
+var dependency_graph_1 = require("./scripts/dependency-graph");
 // Types for Node.js globals (process, etc.)
 // If you see type errors, run: npm install --save-dev @types/node
 dotenv.config();
@@ -347,90 +348,102 @@ function getSubIssues(issue) {
 }
 function main() {
     return __awaiter(this, void 0, void 0, function () {
-        var raw, data, tasks, idToIssue, _loop_1, _i, tasks_1, task, _loop_2, _a, tasks_2, task, queueStatus;
-        var _b, _c, _d, _e, _f;
-        return __generator(this, function (_g) {
-            switch (_g.label) {
+        var raw, data, tasks, taskGraph, cycleResult, resolutionOrder, idToIssue, _loop_1, _i, tasks_1, task, _loop_2, _a, tasks_2, task, queueStatus;
+        var _b, _c, _d, _e, _f, _g;
+        return __generator(this, function (_h) {
+            switch (_h.label) {
                 case 0:
                     raw = fs.readFileSync(TASKS_PATH, 'utf-8');
                     data = JSON.parse(raw);
                     tasks = data.master.tasks;
+                    // Validate dependency graph and detect cycles
+                    console.log('🔍 Analyzing task dependency graph...');
+                    taskGraph = (0, dependency_graph_1.createDependencyGraphFromTasks)(tasks);
+                    cycleResult = taskGraph.detectCycles();
+                    if (cycleResult.hasCycle) {
+                        console.error("\u274C Circular dependency detected: ".concat((_b = cycleResult.cycle) === null || _b === void 0 ? void 0 : _b.join(' → ')));
+                        console.error('Please resolve the circular dependency before proceeding.');
+                        process.exit(1);
+                    }
+                    resolutionOrder = taskGraph.getResolutionOrder();
+                    console.log("\u2705 Dependency graph is valid. Resolution order: ".concat(resolutionOrder.order.join(' → ')));
+                    console.log("\uD83D\uDCCA Dependency levels: ".concat(resolutionOrder.levels.length, " (tasks can be parallelized within levels)"));
                     idToIssue = {};
                     _loop_1 = function (task) {
-                        var baseIssue, parentIssue, _h, _loop_3, _j, _k, sub;
-                        var _l;
-                        return __generator(this, function (_m) {
-                            switch (_m.label) {
+                        var baseIssue, parentIssue, _j, _loop_3, _k, _l, sub;
+                        var _m;
+                        return __generator(this, function (_o) {
+                            switch (_o.label) {
                                 case 0:
                                     task.requiredBy = tasks.filter(function (t) { var _a; return (_a = t.dependencies) === null || _a === void 0 ? void 0 : _a.find(function (d) { return d === task.id; }); });
                                     return [4 /*yield*/, createOrGetIssue(task)];
                                 case 1:
-                                    baseIssue = _m.sent();
-                                    _h = [__assign({}, baseIssue)];
-                                    _l = {};
+                                    baseIssue = _o.sent();
+                                    _j = [__assign({}, baseIssue)];
+                                    _m = {};
                                     return [4 /*yield*/, getSubIssues(baseIssue)];
                                 case 2:
-                                    parentIssue = __assign.apply(void 0, _h.concat([(_l.subIssues = _m.sent(), _l)]));
+                                    parentIssue = __assign.apply(void 0, _j.concat([(_m.subIssues = _o.sent(), _m)]));
                                     idToIssue["".concat(task.id)] = parentIssue;
                                     if (!task.subtasks) return [3 /*break*/, 6];
                                     _loop_3 = function (sub) {
                                         var subIssue, subId;
-                                        return __generator(this, function (_o) {
-                                            switch (_o.label) {
+                                        return __generator(this, function (_p) {
+                                            switch (_p.label) {
                                                 case 0:
-                                                    sub.requiredBy = (_b = task.subtasks) === null || _b === void 0 ? void 0 : _b.filter(function (t) { var _a; return (_a = t.dependencies) === null || _a === void 0 ? void 0 : _a.find(function (d) { return d === sub.id; }); });
+                                                    sub.requiredBy = (_c = task.subtasks) === null || _c === void 0 ? void 0 : _c.filter(function (t) { var _a; return (_a = t.dependencies) === null || _a === void 0 ? void 0 : _a.find(function (d) { return d === sub.id; }); });
                                                     return [4 /*yield*/, createOrGetIssue(sub, task, parentIssue)];
                                                 case 1:
-                                                    subIssue = _o.sent();
+                                                    subIssue = _p.sent();
                                                     // Link subtask to parent task
                                                     return [4 /*yield*/, addSubIssue(parentIssue, subIssue)];
                                                 case 2:
                                                     // Link subtask to parent task
-                                                    _o.sent();
+                                                    _p.sent();
                                                     subId = "".concat(task.id, ".").concat(sub.id);
                                                     idToIssue[subId] = subIssue;
                                                     return [2 /*return*/];
                                             }
                                         });
                                     };
-                                    _j = 0, _k = task.subtasks;
-                                    _m.label = 3;
+                                    _k = 0, _l = task.subtasks;
+                                    _o.label = 3;
                                 case 3:
-                                    if (!(_j < _k.length)) return [3 /*break*/, 6];
-                                    sub = _k[_j];
+                                    if (!(_k < _l.length)) return [3 /*break*/, 6];
+                                    sub = _l[_k];
                                     return [5 /*yield**/, _loop_3(sub)];
                                 case 4:
-                                    _m.sent();
-                                    _m.label = 5;
+                                    _o.sent();
+                                    _o.label = 5;
                                 case 5:
-                                    _j++;
+                                    _k++;
                                     return [3 /*break*/, 3];
                                 case 6: return [2 /*return*/];
                             }
                         });
                     };
                     _i = 0, tasks_1 = tasks;
-                    _g.label = 1;
+                    _h.label = 1;
                 case 1:
                     if (!(_i < tasks_1.length)) return [3 /*break*/, 4];
                     task = tasks_1[_i];
                     return [5 /*yield**/, _loop_1(task)];
                 case 2:
-                    _g.sent();
-                    _g.label = 3;
+                    _h.sent();
+                    _h.label = 3;
                 case 3:
                     _i++;
                     return [3 /*break*/, 1];
                 case 4:
                     _loop_2 = function (task) {
-                        var issue, depIssues, reqByIssues, taskId, complexity, baseLabels, dependencyLabels, updatedLabels, needsUpdate, _p, _q, sub, issue_1, depIssues_1, reqByIssues_1, subTaskId, subComplexity, subBaseLabels, subDependencyLabels, subUpdatedLabels, subNeedsUpdate;
-                        return __generator(this, function (_r) {
-                            switch (_r.label) {
+                        var issue, depIssues, reqByIssues, taskId, complexity, baseLabels, dependencyLabels, updatedLabels, needsUpdate, _q, _r, sub, issue_1, depIssues_1, reqByIssues_1, subTaskId, subComplexity, subBaseLabels, subDependencyLabels, subUpdatedLabels, subNeedsUpdate;
+                        return __generator(this, function (_s) {
+                            switch (_s.label) {
                                 case 0:
                                     issue = idToIssue["".concat(task.id)];
-                                    depIssues = (_c = task.dependencies) === null || _c === void 0 ? void 0 : _c.map(function (depId) { return idToIssue["".concat(depId)]; }).filter(Boolean);
+                                    depIssues = (_d = task.dependencies) === null || _d === void 0 ? void 0 : _d.map(function (depId) { return idToIssue["".concat(depId)]; }).filter(Boolean);
                                     issue.expectedBody = updateIssueWithDependencies(issue.expectedBody, depIssues);
-                                    reqByIssues = (_d = task.requiredBy) === null || _d === void 0 ? void 0 : _d.map(function (reqBy) { return idToIssue["".concat(reqBy.id)]; }).filter(Boolean);
+                                    reqByIssues = (_e = task.requiredBy) === null || _e === void 0 ? void 0 : _e.map(function (reqBy) { return idToIssue["".concat(reqBy.id)]; }).filter(Boolean);
                                     issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
                                     taskId = String(task.id);
                                     complexity = complexityMap[taskId];
@@ -444,20 +457,20 @@ function main() {
                                             labels: updatedLabels,
                                         })];
                                 case 1:
-                                    _r.sent();
+                                    _s.sent();
                                     console.log("Updated issue #".concat(issue.number, " with dependencies/required-bys and labels."));
-                                    _r.label = 2;
+                                    _s.label = 2;
                                 case 2:
                                     if (!task.subtasks) return [3 /*break*/, 6];
-                                    _p = 0, _q = task.subtasks;
-                                    _r.label = 3;
+                                    _q = 0, _r = task.subtasks;
+                                    _s.label = 3;
                                 case 3:
-                                    if (!(_p < _q.length)) return [3 /*break*/, 6];
-                                    sub = _q[_p];
+                                    if (!(_q < _r.length)) return [3 /*break*/, 6];
+                                    sub = _r[_q];
                                     issue_1 = idToIssue["".concat(task.id, ".").concat(sub.id)];
-                                    depIssues_1 = (_e = sub.dependencies) === null || _e === void 0 ? void 0 : _e.map(function (depId) { return idToIssue["".concat(task.id, ".").concat(depId)]; }).filter(Boolean);
+                                    depIssues_1 = (_f = sub.dependencies) === null || _f === void 0 ? void 0 : _f.map(function (depId) { return idToIssue["".concat(task.id, ".").concat(depId)]; }).filter(Boolean);
                                     issue_1.expectedBody = updateIssueWithDependencies(issue_1.expectedBody, depIssues_1);
-                                    reqByIssues_1 = (_f = sub.requiredBy) === null || _f === void 0 ? void 0 : _f.map(function (reqBy) { return idToIssue["".concat(task.id, ".").concat(reqBy.id)]; }).filter(Boolean);
+                                    reqByIssues_1 = (_g = sub.requiredBy) === null || _g === void 0 ? void 0 : _g.map(function (reqBy) { return idToIssue["".concat(task.id, ".").concat(reqBy.id)]; }).filter(Boolean);
                                     issue_1.expectedBody = updateBodyWithRequiredBy(issue_1.expectedBody, reqByIssues_1);
                                     subTaskId = "".concat(task.id, ".").concat(sub.id);
                                     subComplexity = complexityMap[subTaskId];
@@ -471,25 +484,25 @@ function main() {
                                             labels: subUpdatedLabels,
                                         })];
                                 case 4:
-                                    _r.sent();
+                                    _s.sent();
                                     console.log("Updated issue #".concat(issue_1.number, " with dependencies/required-bys and labels."));
-                                    _r.label = 5;
+                                    _s.label = 5;
                                 case 5:
-                                    _p++;
+                                    _q++;
                                     return [3 /*break*/, 3];
                                 case 6: return [2 /*return*/];
                             }
                         });
                     };
                     _a = 0, tasks_2 = tasks;
-                    _g.label = 5;
+                    _h.label = 5;
                 case 5:
                     if (!(_a < tasks_2.length)) return [3 /*break*/, 8];
                     task = tasks_2[_a];
                     return [5 /*yield**/, _loop_2(task)];
                 case 6:
-                    _g.sent();
-                    _g.label = 7;
+                    _h.sent();
+                    _h.label = 7;
                 case 7:
                     _a++;
                     return [3 /*break*/, 5];
@@ -499,7 +512,7 @@ function main() {
                     return [4 /*yield*/, githubApi.waitForCompletion()];
                 case 9:
                     // Wait for all pending API requests to complete
-                    _g.sent();
+                    _h.sent();
                     queueStatus = githubApi.getQueueStatus();
                     console.log("Final queue status: ".concat(queueStatus.pending, " pending, ").concat(queueStatus.active, " active"));
                     // Clean up resources

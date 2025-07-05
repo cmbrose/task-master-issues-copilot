@@ -15,6 +15,7 @@ import * as dotenv from 'dotenv';
 
 import { components } from "@octokit/openapi-types";
 import { EnhancedGitHubApi, createGitHubApiClient } from './scripts/github-api';
+import { DependencyGraph, createDependencyGraphFromTasks, CycleDetectionResult } from './scripts/dependency-graph';
 
 // Types for Node.js globals (process, etc.)
 // If you see type errors, run: npm install --save-dev @types/node
@@ -336,6 +337,21 @@ async function main() {
   const raw = fs.readFileSync(TASKS_PATH, 'utf-8');
   const data: TaskmasterJson = JSON.parse(raw);
   const tasks = data.master.tasks;
+
+  // Validate dependency graph and detect cycles
+  console.log('🔍 Analyzing task dependency graph...');
+  const taskGraph = createDependencyGraphFromTasks(tasks);
+  
+  const cycleResult = taskGraph.detectCycles();
+  if (cycleResult.hasCycle) {
+    console.error(`❌ Circular dependency detected: ${cycleResult.cycle?.join(' → ')}`);
+    console.error('Please resolve the circular dependency before proceeding.');
+    process.exit(1);
+  }
+  
+  const resolutionOrder = taskGraph.getResolutionOrder();
+  console.log(`✅ Dependency graph is valid. Resolution order: ${resolutionOrder.order.join(' → ')}`);
+  console.log(`📊 Dependency levels: ${resolutionOrder.levels.length} (tasks can be parallelized within levels)`);
 
   // Create issues for all tasks and subtasks
   const idToIssue: Record<string, Issue> = {};

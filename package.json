@@ -11,7 +11,8 @@
         "test:labels": "./test/test-label-hierarchy.sh",
         "test:generate": "./test/test-generate-workflow.sh",
         "test:issue-creation": "./test/test-issue-creation.sh",
-        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && ./test/test-issue-creation.sh"
+        "test:dependency-graph": "./test/test-dependency-graph.sh",
+        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && ./test/test-issue-creation.sh && ./test/test-dependency-graph.sh"
     },
     "dependencies": {
         "@actions/core": "^1.10.1",

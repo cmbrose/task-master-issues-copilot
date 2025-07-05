@@ -1,0 +1,46 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Setup Repository",
+        "description": "Initialize repository structure",
+        "dependencies": []
+      },
+      {
+        "id": 2,
+        "title": "Sub-issues API integration", 
+        "description": "Create API client methods to retrieve sub-issues",
+        "dependencies": [1]
+      },
+      {
+        "id": 3,
+        "title": "YAML front-matter parsing",
+        "description": "Create parser to extract structured data from issue descriptions",
+        "dependencies": [1]
+      },
+      {
+        "id": 4,
+        "title": "Dependency tracking logic",
+        "description": "Implement a graph data structure for dependency tracking",
+        "dependencies": [2, 3]
+      },
+      {
+        "id": 5,
+        "title": "Testing",
+        "description": "Comprehensive testing of all components",
+        "dependencies": [4]
+      },
+      {
+        "id": 6,
+        "title": "Documentation",
+        "description": "Write comprehensive documentation",
+        "dependencies": [4]
+      }
+    ],
+    "metadata": {
+      "version": "1.0.0",
+      "generated": "2023-01-01T00:00:00Z"
+    }
+  }
+}
