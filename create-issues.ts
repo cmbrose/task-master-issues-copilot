@@ -83,7 +83,72 @@ try {
   complexityMap = {};
 }
 
-// Helper to create issue body
+// Helper to update issue labels based on dependency status
+function updateDependencyLabels(task: Task, dependencyIssues: Issue[] | undefined): string[] {
+  const additionalLabels: string[] = [];
+  
+  if (!dependencyIssues || dependencyIssues.length === 0) {
+    return additionalLabels;
+  }
+  
+  const openDependencies = dependencyIssues.filter(issue => issue.state === 'open');
+  
+  if (openDependencies.length > 0) {
+    additionalLabels.push('blocked');
+    additionalLabels.push(`blocked-by:${openDependencies.length}`);
+  } else {
+    // All dependencies are closed, task is ready
+    additionalLabels.push('ready');
+  }
+  
+  return additionalLabels;
+}
+
+// Helper to generate comprehensive labels for issues
+function generateIssueLabels(task: Task, parentTask?: Task, complexityScore?: number): string[] {
+  const labels = ['taskmaster'];
+  
+  // Priority labels
+  if (task.priority) {
+    labels.push(`priority:${task.priority.toLowerCase()}`);
+  }
+  
+  // Status labels
+  if (task.status) {
+    labels.push(`status:${task.status.toLowerCase()}`);
+  }
+  
+  // Task type labels
+  if (parentTask) {
+    labels.push('subtask');
+    labels.push(`parent:${parentTask.id}`);
+  } else {
+    labels.push('main-task');
+  }
+  
+  // Complexity labels
+  if (complexityScore !== undefined) {
+    if (complexityScore >= 8) {
+      labels.push('complexity:high');
+    } else if (complexityScore >= 5) {
+      labels.push('complexity:medium');
+    } else {
+      labels.push('complexity:low');
+    }
+  }
+  
+  // Dependency status labels
+  if (task.dependencies && task.dependencies.length > 0) {
+    labels.push('has-dependencies');
+  }
+  
+  // Hierarchy labels
+  if (task.subtasks && task.subtasks.length > 0) {
+    labels.push('has-subtasks');
+  }
+  
+  return labels;
+}
 function buildIssueBody(task: Task, parentIssue?: Issue): string {
   let body = '';
   // Add complexity if available
@@ -148,17 +213,35 @@ async function findExistingIssue(title: string): Promise<ApiIssue | null> {
 }
 
 
+// Helper to create enhanced issue title with priority ordering
+function buildIssueTitle(task: Task, parentTask?: Task): string {
+  let title: string;
+  
+  // Priority prefixes for ordering (high priority tasks appear first)
+  const priorityPrefix = task.priority ? 
+    (task.priority.toLowerCase() === 'high' ? '[🔴 HIGH] ' : 
+     task.priority.toLowerCase() === 'medium' ? '[🟡 MED] ' : 
+     task.priority.toLowerCase() === 'low' ? '[🟢 LOW] ' : '') : '';
+  
+  if (typeof parentTask !== 'undefined' && 'id' in task) {
+    title = `${priorityPrefix}[${parentTask.id}.${task.id}] ${task.title}`;
+  } else {
+    title = `${priorityPrefix}[${task.id}] ${task.title}`;
+  }
+  
+  return title;
+}
+
 // Helper to create or get issue
 async function createOrGetIssue(task: Task, parentTask?: Task, parentIssue?: Issue): Promise<Issue> {
-  // If this is a subtask (parentTask is defined), make the title unique by including parent and subtask ID
-  let title: string;
-  if (typeof parentTask !== 'undefined' && 'id' in task) {
-    title = `[${parentTask.id}.${task.id}] ${task.title}`;
-  } else {
-    title = task.title;
-  }
+  const title = buildIssueTitle(task, parentTask);
 
   const body = buildIssueBody(task, parentIssue);
+  
+  // Generate comprehensive labels
+  const taskId = parentTask ? `${parentTask.id}.${task.id}` : String(task.id);
+  const complexity = complexityMap[taskId];
+  const labels = generateIssueLabels(task, parentTask, complexity);
 
   let existingIssue = await findExistingIssue(title);
   if (existingIssue) {
@@ -172,7 +255,7 @@ async function createOrGetIssue(task: Task, parentTask?: Task, parentIssue?: Iss
   const createdIssue = await githubApi.createIssue({
     title,
     body,
-    labels: ['taskmaster'],
+    labels,
   });
 
   allIssuesCache.push(createdIssue);
@@ -284,7 +367,7 @@ async function main() {
     }
   }
 
-  // Update issues with dependency links
+  // Update issues with dependency links and labels
   // For parent tasks
   for (const task of tasks) {
     const issue = idToIssue[`${task.id}`];
@@ -295,11 +378,22 @@ async function main() {
     const reqByIssues = task.requiredBy?.map(reqBy => idToIssue[`${reqBy.id}`]).filter(Boolean);
     issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
 
-    if (issue.expectedBody !== issue.body) {
+    // Generate updated labels with dependency status
+    const taskId = String(task.id);
+    const complexity = complexityMap[taskId];
+    const baseLabels = generateIssueLabels(task, undefined, complexity);
+    const dependencyLabels = updateDependencyLabels(task, depIssues);
+    const updatedLabels = [...baseLabels, ...dependencyLabels];
+
+    // Update issue if body or labels need updating
+    const needsUpdate = issue.expectedBody !== issue.body;
+    
+    if (needsUpdate) {
       await githubApi.updateIssue(issue.number, {
         body: issue.expectedBody,
+        labels: updatedLabels,
       });
-      console.log(`Updated issue #${issue.number} with dependencies/required-bys.`);
+      console.log(`Updated issue #${issue.number} with dependencies/required-bys and labels.`);
     }
 
       // For subtasks
@@ -313,11 +407,21 @@ async function main() {
         const reqByIssues = sub.requiredBy?.map(reqBy => idToIssue[`${task.id}.${reqBy.id}`]).filter(Boolean);
         issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
 
-        if (issue.expectedBody !== issue.body) {
+        // Generate updated labels for subtask
+        const subTaskId = `${task.id}.${sub.id}`;
+        const subComplexity = complexityMap[subTaskId];
+        const subBaseLabels = generateIssueLabels(sub, task, subComplexity);
+        const subDependencyLabels = updateDependencyLabels(sub, depIssues);
+        const subUpdatedLabels = [...subBaseLabels, ...subDependencyLabels];
+
+        const subNeedsUpdate = issue.expectedBody !== issue.body;
+        
+        if (subNeedsUpdate) {
           await githubApi.updateIssue(issue.number, {
             body: issue.expectedBody,
+            labels: subUpdatedLabels,
           });
-          console.log(`Updated issue #${issue.number} with dependencies/required-bys.`);
+          console.log(`Updated issue #${issue.number} with dependencies/required-bys and labels.`);
         }
       }
     }
