@@ -37,7 +37,7 @@ workflow_dispatch:
 
 ### 2. PRD File Changes (`push`)
 
-Automatically triggers when PRD files are modified:
+Automatically triggers when PRD files are modified on main branches:
 
 ```yaml
 push:
@@ -52,9 +52,29 @@ push:
 **Behavior:**
 - Mode: `generate`
 - Scan: `webhook`
+- Dry-run: `false`
 - Processes changed PRD files to create/update issues
 
-### 3. Issue Comments (`issue_comment`)
+### 3. Pull Request Changes (`pull_request`)
+
+Triggers on pull requests that modify PRD files for preview/analysis:
+
+```yaml
+pull_request:
+  paths:
+    - 'docs/**.prd.md'
+    - 'docs/**/*.prd.md'
+  types: [opened, synchronize, reopened]
+```
+
+**Behavior:**
+- Mode: `generate`
+- Scan: `webhook`
+- Dry-run: `true`
+- Analyzes PRD changes without creating issues
+- Provides preview of what would be created
+
+### 4. Issue Comments (`issue_comment`)
 
 Responds to `/breakdown` commands in issue comments:
 
@@ -75,7 +95,7 @@ Comment on any issue with:
 /breakdown max-depth=3 complexity=30
 ```
 
-### 4. Issue State Changes (`issues`)
+### 5. Issue State Changes (`issues`)
 
 Tracks issue closures for dependency management:
 
@@ -89,7 +109,7 @@ issues:
 - Scan: `webhook`
 - Updates blocked status of dependent issues
 
-### 5. Scheduled Runs (`schedule`)
+### 6. Scheduled Runs (`schedule`)
 
 Periodic dependency checking:
 
@@ -139,13 +159,14 @@ Example error:
 
 The workflow automatically determines the appropriate action mode:
 
-| Trigger | Mode | Scan Mode | Purpose |
-|---------|------|-----------|---------|
-| `workflow_dispatch` | User choice | User choice | Manual execution |
-| `push` | `generate` | `webhook` | PRD processing |
-| `issue_comment` | `breakdown` | `webhook` | Issue breakdown |
-| `issues` | `watcher` | `webhook` | Dependency tracking |
-| `schedule` | `watcher` | `full` | Periodic checks |
+| Trigger | Mode | Scan Mode | Dry-run | Purpose |
+|---------|------|-----------|---------|---------|
+| `workflow_dispatch` | User choice | User choice | `false` | Manual execution |
+| `push` | `generate` | `webhook` | `false` | PRD processing |
+| `pull_request` | `generate` | `webhook` | `true` | PRD preview/analysis |
+| `issue_comment` | `breakdown` | `webhook` | `false` | Issue breakdown |
+| `issues` | `watcher` | `webhook` | `false` | Dependency tracking |
+| `schedule` | `watcher` | `full` | `false` | Periodic checks |
 
 ## Configuration Examples
 
