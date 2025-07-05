@@ -1,0 +1,69 @@
+name: Test Checkout Configuration
+
+on:
+  workflow_dispatch:
+    inputs:
+      test-scenario:
+        description: 'Test scenario to run'
+        required: false
+        default: 'basic'
+        type: choice
+        options:
+          - 'basic'
+          - 'shallow-clone'
+          - 'different-ref'
+          - 'skip-checkout'
+
+jobs:
+  test-checkout-scenarios:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test Basic Checkout (via composite action)
+        if: inputs.test-scenario == 'basic'
+        uses: cmbrose/task-master-issues@main
+        with:
+          action-mode: 'generate'
+          complexity-threshold: '50'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Test Shallow Clone (fetch-depth=1)
+        if: inputs.test-scenario == 'shallow-clone'
+        uses: cmbrose/task-master-issues@main
+        with:
+          fetch-depth: '1'
+          action-mode: 'generate'
+          complexity-threshold: '50'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Manual Checkout + Skip Checkout Test
+        if: inputs.test-scenario == 'skip-checkout'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Test Skip Checkout
+        if: inputs.test-scenario == 'skip-checkout'
+        uses: cmbrose/task-master-issues@main
+        with:
+          skip-checkout: 'true'
+          action-mode: 'generate'
+          complexity-threshold: '50'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Test Individual Action with Checkout
+        if: inputs.test-scenario == 'different-ref'
+        uses: cmbrose/task-master-issues/actions/taskmaster-generate@main
+        with:
+          ref: 'main'
+          fetch-depth: '1'
+          complexity-threshold: '50'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify Repository State
+        run: |
+          echo "✅ Checkout configuration test completed"
+          echo "Current directory: $(pwd)"
+          echo "Repository status:"
+          git status || echo "No git repository"
+          echo "Available files:"
+          ls -la

@@ -68,6 +68,7 @@ jobs:
       - name: Run Taskmaster with Input Validation
         uses: ./
         with:
+          skip-checkout: 'true'
           complexity-threshold: ${{ github.event_name == 'workflow_dispatch' && inputs.complexity || '40' }}
           prd-path-glob: ${{ github.event_name == 'workflow_dispatch' && inputs.prd-file && inputs.prd-file || 'docs/**.prd.md' }}
           action-mode: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'generate' }}
