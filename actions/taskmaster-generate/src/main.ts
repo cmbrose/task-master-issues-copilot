@@ -190,15 +190,16 @@ function updateDependencyLabels(task: Task, dependencyIssues: Issue[] | undefine
  * Build YAML front-matter and issue body from task data
  */
 function buildIssueBody(task: Task, parentIssue?: Issue): string {
-  const yamlFrontMatter = [
+  const yamlLines = [
     '---',
     `id: ${task.id}`,
     parentIssue ? `parent: ${parentIssue.number}` : '',
     task.dependencies && task.dependencies.length > 0 ? 
       `dependencies: [${task.dependencies.join(', ')}]` : '',
-    '---',
-    ''
-  ].filter(line => line !== '').join('\n');
+    '---'
+  ].filter(line => line !== '');
+  
+  const yamlFrontMatter = yamlLines.join('\n') + '\n\n';
 
   let body = yamlFrontMatter;
 
