@@ -274,18 +274,8 @@ async function addSubIssue(parentIssue: ParentIssue, subIssue: Issue) {
     return;
   }
 
-  // Note: GitHub's addSubIssue API may not be available in all cases
-  // This is a placeholder for when such functionality becomes available
   try {
-    // await githubApi.executeWithRetry(async () => {
-    //   return await octokit.issues.addSubIssue({
-    //     owner: GITHUB_OWNER!,
-    //     repo: GITHUB_REPO!,
-    //     issue_number: parentIssue.number,
-    //     sub_issue_id: subIssue.id,
-    //   });
-    // }, 'add-sub-issue');
-    
+    await githubApi.addSubIssue(parentIssue.number, subIssue.number);
     parentIssue.subIssues.push(subIssue);
     console.log(`Added sub-issue #${subIssue.number} to parent #${parentIssue.number}.`);
   } catch (error) {
@@ -313,18 +303,8 @@ function updateBodyWithRequiredBy(body: string, requiredByIssues: Issue[] | unde
 }
 
 async function getSubIssues(issue: Issue): Promise<ApiIssue[]> {
-  // Note: GitHub's listSubIssues API may not be available in all cases
-  // Return empty array as fallback
   try {
-    // const subIssues = await githubApi.executeWithRetry(async () => {
-    //   return await octokit.issues.listSubIssues({
-    //     owner: GITHUB_OWNER!,
-    //     repo: GITHUB_REPO!,
-    //     issue_number: issue.number,
-    //   });
-    // }, 'list-sub-issues');
-    // return subIssues.data;
-    return [];
+    return await githubApi.getSubIssues(issue.number);
   } catch (error) {
     console.warn(`Failed to fetch sub-issues for #${issue.number}: ${error instanceof Error ? error.message : String(error)}`);
     return [];

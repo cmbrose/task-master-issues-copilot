@@ -13,13 +13,15 @@
         "test:labels": "./test/test-label-hierarchy.sh",
         "test:generate": "./test/test-generate-workflow.sh",
         "test:issue-creation": "./test/test-issue-creation.sh",
+        "test:sub-issues-api": "npx ts-node test/test-sub-issues-api.ts",
         "test:yaml-parser": "./test/test-yaml-parser.sh",
-        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && ./test/test-issue-creation.sh && ./test/test-yaml-parser.sh"
+        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && npm run test:issue-creation && npm run test:yaml-parser && npm run test:sub-issues-api"
     },
     "dependencies": {
         "@actions/core": "^1.10.1",
         "@actions/github": "^6.0.0",
         "@octokit/rest": "^20.0.0",
+        "@octokit/openapi-types": "^19.0.0",
         "dotenv": "^16.0.0",
         "js-yaml": "^4.1.0"
     },
