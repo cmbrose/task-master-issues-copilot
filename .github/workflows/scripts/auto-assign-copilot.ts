@@ -10,6 +10,16 @@ function normalizeBody(body: string | undefined | null): string {
     if (!body) {
         return "";
     }
+
+    // Try to extract the original body from an HTML comment block
+    const match = body.match(/<!--\s*ORIGINAL ISSUE BODY \(before reformat\):([\s\S]*?)-->/i);
+    if (match) {
+        // Unescape any &lt;!-- and --&gt; back to <!-- and -->
+        let original = match[1].trim();
+        original = original.replace(/&lt;!--/g, '<!--').replace(/--&gt;/g, '-->');
+        return original;
+    }
+
     // Use a global regex to remove all non-letter, non-colon, non-space, non-hyphen characters
     return body.replace(/[^a-zA-Z0-9:\s#-]/g, '');
 }

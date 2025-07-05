@@ -51,4 +51,10 @@ jobs:
              Preserve all headings, sections, and comments exactly (do not add HRs). \
              Only clean up markdown, code blocks, and lists or the content for readability. \
           ")
-          gh api --method PATCH repos/${{ github.repository }}/issues/${ISSUE_NUMBER} -f body="$NEW_BODY"
+
+          # Escape comments in the original body so that the new comment block isn't broken
+          ESCAPED_BODY=$(printf '%s' "$BODY" | sed 's/<!--/&lt;!--/g; s/-->/--&gt;/g')
+
+          BODY_WITH_BACKUP="$(printf '%s\n\n<!--\nORIGINAL ISSUE BODY (before reformat):\n\n%s\n-->' "$NEW_BODY" "$ESCAPED_BODY")"
+          
+          gh api --method PATCH repos/${{ github.repository }}/issues/${ISSUE_NUMBER} -f body="$BODY_WITH_BACKUP"
