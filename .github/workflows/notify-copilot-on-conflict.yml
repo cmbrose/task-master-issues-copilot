@@ -1,4 +1,4 @@
-name: Notify Copilot on PR Conflict
+name: Auto Resolve Merge Conflicts
 
 on:
   repository_dispatch:
@@ -51,36 +51,45 @@ jobs:
 
       - name: Checkout base branch
         run: |
+          git config --global user.email "auto-conflict-resolver@tools.com"
+          git config --global user.name "Conflict Resolver"
           git checkout "origin/${{ steps.prinfo.outputs.base_branch }}" -b base-branch
 
       - name: Attempt merge and collect conflicts
         id: merge
         continue-on-error: true
         run: |
-          git config --global user.email "you@example.com"
-          git config --global user.name "Your Name"
-
           git merge "origin/${{ steps.prinfo.outputs.head_branch }}" || true
-          CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
+          CONFLICT_FILES=$(git diff --name-only)
           if [ -z "$CONFLICT_FILES" ]; then
             echo "No merge conflicts detected."
             exit 0
           fi
           echo "$CONFLICT_FILES" > conflict_files.txt
 
-      - name: Extract conflict blocks
+      - name: Handle Merge Conflicts
         if: steps.merge.outcome == 'success' || steps.merge.outcome == 'failure'
         run: |
-          PR_NUMBER="${{ steps.prinfo.outputs.pr_number }}"
-          echo "## :warning: Merge Conflicts Detected" > conflict_report.md
-          echo "The following files have merge conflicts in PR #$PR_NUMBER:" >> conflict_report.md
           while read file; do
-            echo "### $file" >> conflict_report.md
-            echo "\`\`\`" >> conflict_report.md
-            awk '/<<<<<<< /, />>>>>>> /' "$file" >> conflict_report.md
-            echo "\`\`\`" >> conflict_report.md
+            echo "Resolving conflict in $file with LLM..."
+            result=$(llm --model github/o3-mini \
+              --functions .github/workflows/scripts/resolve-merge-conflicts.py \
+              --td \
+              --fragment $file \
+              --schema "success bool" \
+              --system "You are a merge conflict resolver. Use the provided tools to resolve the conflict. Report success or failure" \
+              "Resolve conflicts in $file"
+              | jq '.success')
+
+            if [ "$result" != "true" ]; then
+              echo "Failed to resolve conflict in $file. Exiting."
+              exit 1
+            fi
           done < conflict_files.txt
-          echo "cc @copilot" >> conflict_report.md
+
+          git add .
+          git commit -am "Merge conflicts"
+          git push
 
       - name: Post conflict comment to PR
         if: steps.merge.outcome == 'success' || steps.merge.outcome == 'failure'
