@@ -517,7 +517,7 @@ export class EnhancedGitHubApi {
     return this.executeWithRetry(async () => {
       // Add parent reference label to sub-issue
       const subIssueLabels = Array.isArray(subIssue.labels) 
-        ? subIssue.labels.map(label => typeof label === 'string' ? label : label.name).filter(Boolean)
+        ? subIssue.labels.map(label => typeof label === 'string' ? label : label.name).filter((name): name is string => !!name)
         : [];
       
       const parentLabel = `parent:${parentIssue.number}`;
@@ -548,7 +548,7 @@ export class EnhancedGitHubApi {
     return this.executeWithRetry(async () => {
       // Remove parent reference label from sub-issue
       const subIssueLabels = Array.isArray(subIssue.labels) 
-        ? subIssue.labels.map(label => typeof label === 'string' ? label : label.name).filter(Boolean)
+        ? subIssue.labels.map(label => typeof label === 'string' ? label : label.name).filter((name): name is string => !!name)
         : [];
       
       const parentLabel = `parent:${parentIssue.number}`;
