@@ -387,7 +387,7 @@ export class EnhancedGitHubApi {
         repo: this.config.repo,
         ...params
       });
-      return response.data;
+      return response.data as ApiIssue;
     }, 'create-issue');
   }
 
@@ -407,7 +407,7 @@ export class EnhancedGitHubApi {
         issue_number: issueNumber,
         ...params
       });
-      return response.data;
+      return response.data as ApiIssue;
     }, 'update-issue');
   }
 
@@ -428,7 +428,7 @@ export class EnhancedGitHubApi {
         per_page: 100,
         ...params
       });
-      return response.data;
+      return response.data as ApiIssue[];
     }, 'list-issues');
   }
 
@@ -455,7 +455,7 @@ export class EnhancedGitHubApi {
             repo: this.config.repo,
             issue_number: subIssueNumber
           });
-          subIssues.push(subIssue.data);
+          subIssues.push(subIssue.data as ApiIssue);
         } catch (error) {
           this.log(`Failed to fetch sub-issue #${subIssueNumber}: ${error}`);
         }
