@@ -3,6 +3,7 @@ name: Auto Publish and Merge PR on Assignment
 on:
   pull_request:
     types: [assigned]
+  workflow_dispatch:
 
 jobs:
   publish-and-merge:
