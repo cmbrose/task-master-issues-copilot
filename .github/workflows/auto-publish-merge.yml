@@ -1,8 +1,8 @@
 name: Auto Publish and Merge PR on Assignment
 
 on:
-  pull_request:
-    types: [review_requested]
+#  pull_request:
+#    types: [review_requested]
   schedule:
     - cron: '0/5 * * * *' # every 5 minutes
   workflow_dispatch:
