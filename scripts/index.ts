@@ -128,10 +128,15 @@ export {
   parseContentSections,
   parseIssueBody,
   hasYamlFrontMatter,
+  DependencyGraphAnalyzer,
   extractTaskId,
   extractParentId,
   type ParsedYamlFrontMatter,
   type ParsedMetadata,
   type ParsedDependency,
-  type ParsedIssueData
+  type ParsedIssueData,
+  type DependencyNode,
+  type CircularDependency,
+  type ResolutionOrder,
+  type CriticalPath
 } from './issue-parser';
