@@ -57,6 +57,9 @@ jobs:
         id: merge
         continue-on-error: true
         run: |
+          git config --global user.email "you@example.com"
+          git config --global user.name "Your Name"
+
           git merge "origin/${{ steps.prinfo.outputs.head_branch }}" || true
           CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
           if [ -z "$CONFLICT_FILES" ]; then
