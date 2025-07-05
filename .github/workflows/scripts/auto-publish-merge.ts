@@ -17,6 +17,9 @@ const [owner, repo] = repoFull.split("/");
 const graphqlWithAuth = graphql.defaults({ headers: { authorization: `token ${graphQlToken}` } });
 const octokit = new Octokit({ auth: mergeToken });
 
+const user = await octokit.users.getAuthenticated();
+console.log("Authenticated as:", user.data.login);
+
 async function processPR(prNum: number) {
   try {
     // Get PR details
