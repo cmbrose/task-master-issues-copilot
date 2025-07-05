@@ -11,6 +11,35 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { setupTaskmasterCli, getTaskmasterConfigFromInputs, runTaskmasterCli, validateTaskGraph } from './taskmaster-cli';
 import { loadConfig, TaskmasterConfig } from '@scripts/index';
+import { createGitHubApiClient, EnhancedGitHubApi } from '@scripts/github-api';
+import { components } from "@octokit/openapi-types";
+
+// GitHub API types
+type ApiIssue = components["schemas"]["issue"];
+type Issue = ApiIssue & { expectedBody: string };
+type ParentIssue = Issue & { subIssues: ApiIssue[] };
+
+// Task interfaces
+interface Task {
+  id: number;
+  title: string;
+  description: string;
+  details?: string;
+  testStrategy?: string;
+  priority?: string;
+  dependencies?: number[];
+  status?: string;
+  subtasks?: Task[];
+  // Added by app logic
+  requiredBy?: Task[];
+}
+
+interface TaskGraph {
+  tasks: Task[];
+  metadata?: any;
+}
+
+const UNIQUE_MARKER = '<!-- created-by-taskmaster-script -->';
 
 /**
  * Find PRD files matching the given glob pattern
@@ -84,6 +113,350 @@ function matchesPattern(filename: string, pattern: string): boolean {
     
   const regex = new RegExp(`^${regexPattern}$`, 'i');
   return regex.test(filename);
+}
+
+/**
+ * Helper to generate comprehensive labels for issues
+ */
+function generateIssueLabels(task: Task, parentTask?: Task, complexityScore?: number): string[] {
+  const labels = ['taskmaster'];
+  
+  // Priority labels
+  if (task.priority) {
+    labels.push(`priority:${task.priority.toLowerCase()}`);
+  }
+  
+  // Status labels
+  if (task.status) {
+    labels.push(`status:${task.status.toLowerCase()}`);
+  }
+  
+  // Task type labels
+  if (parentTask) {
+    labels.push('subtask');
+    labels.push(`parent:${parentTask.id}`);
+  } else {
+    labels.push('main-task');
+  }
+  
+  // Complexity labels
+  if (complexityScore !== undefined) {
+    if (complexityScore >= 8) {
+      labels.push('complexity:high');
+    } else if (complexityScore >= 5) {
+      labels.push('complexity:medium');
+    } else {
+      labels.push('complexity:low');
+    }
+  }
+  
+  // Dependency status labels
+  if (task.dependencies && task.dependencies.length > 0) {
+    labels.push('has-dependencies');
+  }
+  
+  // Hierarchy labels
+  if (task.subtasks && task.subtasks.length > 0) {
+    labels.push('has-subtasks');
+  }
+  
+  return labels;
+}
+
+/**
+ * Helper to update issue labels based on dependency status
+ */
+function updateDependencyLabels(task: Task, dependencyIssues: Issue[] | undefined): string[] {
+  const additionalLabels: string[] = [];
+  
+  if (!dependencyIssues || dependencyIssues.length === 0) {
+    return additionalLabels;
+  }
+  
+  const openDependencies = dependencyIssues.filter(issue => issue.state === 'open');
+  
+  if (openDependencies.length > 0) {
+    additionalLabels.push('blocked');
+    additionalLabels.push(`blocked-by:${openDependencies.length}`);
+  } else {
+    // All dependencies are closed, task is ready
+    additionalLabels.push('ready');
+  }
+  
+  return additionalLabels;
+}
+
+/**
+ * Build YAML front-matter and issue body from task data
+ */
+function buildIssueBody(task: Task, parentIssue?: Issue): string {
+  const yamlFrontMatter = [
+    '---',
+    `id: ${task.id}`,
+    parentIssue ? `parent: ${parentIssue.number}` : '',
+    task.dependencies && task.dependencies.length > 0 ? 
+      `dependencies: [${task.dependencies.join(', ')}]` : '',
+    '---',
+    ''
+  ].filter(line => line !== '').join('\n');
+
+  let body = yamlFrontMatter;
+
+  if (task.description) {
+    body += `## Description\n\n${task.description}\n\n`;
+  }
+
+  if (task.details) {
+    body += `## Details\n\n${task.details}\n\n`;
+  }
+
+  if (task.testStrategy) {
+    body += `## Test Strategy\n\n${task.testStrategy}\n\n`;
+  }
+
+  if (task.dependencies && task.dependencies.length > 0) {
+    body += `## Dependencies\n\n${task.dependencies.map(dep => `- [ ] Task #${dep}`).join('\n')}\n\n`;
+  }
+
+  const meta = [];
+  if (task.status) meta.push(`- **Status**: \`${task.status}\``);
+  if (task.priority) meta.push(`- **Priority**: \`${task.priority}\``);
+
+  if (meta.length > 0) {
+    body += `## Meta\n\n${meta.join('\n')}\n\n`;
+  }
+
+  body += UNIQUE_MARKER;
+  return body;
+}
+
+/**
+ * Update issue body with dependency links
+ */
+function updateIssueWithDependencies(body: string, dependencyIssues: Issue[]): string {
+  if (!dependencyIssues?.length) return body;
+  
+  const depSection = `## Dependencies\n${dependencyIssues.map(i => 
+    `- [${i.state === 'closed' ? 'x' : ' '}] #${i.number}`
+  ).join('\n')}\n\n`;
+  
+  return body.replace(/## Dependencies[\s\S]+?\n\n/, depSection);
+}
+
+/**
+ * Update issue body with required-by links
+ */
+function updateBodyWithRequiredBy(body: string, requiredByIssues: Issue[]): string {
+  if (!requiredByIssues?.length) return body;
+  
+  const reqBySection = `## Required By\n${requiredByIssues.map(i => 
+    `- [ ] #${i.number}`
+  ).join('\n')}\n\n`;
+  
+  // Add before the UNIQUE_MARKER
+  return body.replace(UNIQUE_MARKER, `${reqBySection}${UNIQUE_MARKER}`);
+}
+
+/**
+ * Create or get an existing issue for a task
+ */
+async function createOrGetIssue(githubApi: EnhancedGitHubApi, task: Task, parentTask?: Task, parentIssue?: Issue): Promise<Issue> {
+  const title = parentTask ? `[${parentTask.id}.${task.id}] ${task.title}` : `[${task.id}] ${task.title}`;
+  
+  // Check if issue already exists
+  const existingIssue = await githubApi.findExistingIssue(title, UNIQUE_MARKER);
+  
+  if (existingIssue) {
+    core.info(`Found existing issue #${existingIssue.number}: ${title}`);
+    return {
+      ...existingIssue,
+      expectedBody: buildIssueBody(task, parentIssue)
+    };
+  }
+
+  // Create new issue
+  const body = buildIssueBody(task, parentIssue);
+  const labels = generateIssueLabels(task, parentTask);
+  
+  core.info(`Creating issue: ${title}`);
+  const newIssue = await githubApi.createIssue({
+    title,
+    body,
+    labels
+  });
+
+  return {
+    ...newIssue,
+    expectedBody: body
+  };
+}
+
+/**
+ * Add a sub-issue relationship using GitHub's sub-issue API
+ */
+async function addSubIssue(githubApi: EnhancedGitHubApi, parentIssue: ParentIssue, subIssue: Issue): Promise<void> {
+  try {
+    // Try to add the sub-issue using GitHub's sub-issue API via the octokit client
+    await githubApi.executeWithRetry(async () => {
+      return await githubApi.client.request('PUT /repos/{owner}/{repo}/issues/{issue_number}/sub_issues/{sub_issue_number}', {
+        owner: github.context.repo.owner,
+        repo: github.context.repo.repo,
+        issue_number: parentIssue.number,
+        sub_issue_number: subIssue.number
+      });
+    }, 'add-sub-issue');
+    
+    core.info(`Added issue #${subIssue.number} as sub-issue of #${parentIssue.number}`);
+  } catch (error) {
+    core.warning(`Failed to add sub-issue relationship: ${error}`);
+    // Fall back to just logging the relationship
+    core.info(`Sub-issue relationship: #${parentIssue.number} -> #${subIssue.number}`);
+  }
+}
+
+/**
+ * Parse task graph and create GitHub issues
+ */
+async function parseTaskGraphAndCreateIssues(taskGraphPath: string, githubToken: string): Promise<number> {
+  core.info('📋 Parsing task graph and creating GitHub issues...');
+  
+  // Read and parse task graph
+  const taskGraphContent = fs.readFileSync(taskGraphPath, 'utf8');
+  const taskGraph: TaskGraph = JSON.parse(taskGraphContent);
+  
+  if (!taskGraph.tasks || taskGraph.tasks.length === 0) {
+    core.warning('No tasks found in task graph');
+    return 0;
+  }
+
+  // Create GitHub API client
+  const context = github.context;
+  const githubApi = createGitHubApiClient({
+    token: githubToken,
+    owner: context.repo.owner,
+    repo: context.repo.repo,
+    maxConcurrent: 3,
+    retryDelay: 1000,
+    maxRetries: 3,
+    debug: false
+  });
+
+  // Build required-by relationships
+  const tasks = taskGraph.tasks;
+  for (const task of tasks) {
+    task.requiredBy = tasks.filter(t => t.dependencies?.includes(task.id));
+    
+    if (task.subtasks) {
+      for (const sub of task.subtasks) {
+        sub.requiredBy = task.subtasks.filter(t => t.dependencies?.includes(sub.id));
+      }
+    }
+  }
+
+  const idToIssue: Record<string, Issue> = {};
+  let issuesCreated = 0;
+
+  // Create issues for main tasks first
+  for (const task of tasks) {
+    const issue = await createOrGetIssue(githubApi, task);
+    idToIssue[String(task.id)] = issue;
+    issuesCreated++;
+
+    // Create issues for subtasks
+    if (task.subtasks) {
+      const parentIssue = issue as ParentIssue;
+      parentIssue.subIssues = [];
+
+      for (const sub of task.subtasks) {
+        const subIssue = await createOrGetIssue(githubApi, sub, task, issue);
+        idToIssue[`${task.id}.${sub.id}`] = subIssue;
+        
+        // Add to parent's sub-issues list
+        parentIssue.subIssues.push(subIssue);
+        
+        // Try to create sub-issue relationship
+        await addSubIssue(githubApi, parentIssue, subIssue);
+        issuesCreated++;
+      }
+    }
+  }
+
+  // Update issues with dependency links and labels
+  for (const task of tasks) {
+    const issue = idToIssue[String(task.id)];
+    
+    const depIssues = task.dependencies?.map(depId => idToIssue[String(depId)]).filter(Boolean);
+    if (depIssues?.length) {
+      issue.expectedBody = updateIssueWithDependencies(issue.expectedBody, depIssues);
+    }
+
+    const reqByIssues = task.requiredBy?.map(reqBy => idToIssue[String(reqBy.id)]).filter(Boolean);
+    if (reqByIssues?.length) {
+      issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
+    }
+
+    // Generate updated labels with dependency status
+    const baseLabels = generateIssueLabels(task);
+    const dependencyLabels = updateDependencyLabels(task, depIssues);
+    const updatedLabels = [...baseLabels, ...dependencyLabels];
+
+    // Update issue if needed
+    const needsUpdate = issue.expectedBody !== issue.body;
+    if (needsUpdate) {
+      await githubApi.updateIssue(issue.number, {
+        body: issue.expectedBody,
+        labels: updatedLabels,
+      });
+      core.info(`Updated issue #${issue.number} with dependencies and labels.`);
+    }
+
+    // Update subtasks
+    if (task.subtasks) {
+      for (const sub of task.subtasks) {
+        const subIssue = idToIssue[`${task.id}.${sub.id}`];
+        
+        const subDepIssues = sub.dependencies?.map(depId => 
+          idToIssue[`${task.id}.${depId}`] || idToIssue[String(depId)]
+        ).filter(Boolean);
+        
+        if (subDepIssues?.length) {
+          subIssue.expectedBody = updateIssueWithDependencies(subIssue.expectedBody, subDepIssues);
+        }
+
+        const subReqByIssues = sub.requiredBy?.map(reqBy => 
+          idToIssue[`${task.id}.${reqBy.id}`]
+        ).filter(Boolean);
+        
+        if (subReqByIssues?.length) {
+          subIssue.expectedBody = updateBodyWithRequiredBy(subIssue.expectedBody, subReqByIssues);
+        }
+
+        const subBaseLabels = generateIssueLabels(sub, task);
+        const subDependencyLabels = updateDependencyLabels(sub, subDepIssues);
+        const subUpdatedLabels = [...subBaseLabels, ...subDependencyLabels];
+
+        const subNeedsUpdate = subIssue.expectedBody !== subIssue.body;
+        if (subNeedsUpdate) {
+          await githubApi.updateIssue(subIssue.number, {
+            body: subIssue.expectedBody,
+            labels: subUpdatedLabels,
+          });
+          core.info(`Updated sub-issue #${subIssue.number} with dependencies and labels.`);
+        }
+      }
+    }
+  }
+
+  // Wait for all pending API requests to complete
+  await githubApi.waitForCompletion();
+  const queueStatus = githubApi.getQueueStatus();
+  core.info(`Final queue status: ${queueStatus.pending} pending, ${queueStatus.active} active`);
+
+  // Clean up resources
+  githubApi.destroy();
+
+  core.info(`✅ Created/updated ${issuesCreated} GitHub issues`);
+  return issuesCreated;
 }
 
 async function run(): Promise<void> {
@@ -185,6 +558,15 @@ async function run(): Promise<void> {
         const taskCount = taskGraph.tasks ? taskGraph.tasks.length : 0;
         core.info(`📊 Generated task graph with ${taskCount} tasks`);
         
+        // Parse task graph and create GitHub issues
+        const githubToken = config.githubToken;
+        if (!githubToken) {
+          throw new Error('GitHub token is required for issue creation');
+        }
+        
+        const issuesCreated = await parseTaskGraphAndCreateIssues(runResult.taskGraphPath, githubToken);
+        core.setOutput('issues-created', issuesCreated.toString());
+        
       } else {
         throw new Error('Task graph was not generated by CLI');
       }
@@ -195,14 +577,6 @@ async function run(): Promise<void> {
       throw error;
     }
 
-    // TODO: Future enhancements
-    // 2. Parse the generated task-graph.json for GitHub issue creation
-    // 3. Create/update GitHub issues with hierarchy
-    // 4. Upload artifact
-    
-    // Set placeholder outputs for now
-    core.setOutput('issues-created', '0');
-    
     core.info('✅ Taskmaster Generate completed successfully');
   } catch (error) {
     const errorMessage = `Action failed: ${error instanceof Error ? error.message : String(error)}`;

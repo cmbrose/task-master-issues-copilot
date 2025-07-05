@@ -120,6 +120,13 @@ export class EnhancedGitHubApi {
   }
 
   /**
+   * Get direct access to the underlying Octokit client for advanced operations
+   */
+  get client(): Octokit {
+    return this.octokit;
+  }
+
+  /**
    * Execute a GitHub API operation with full error handling and retry logic
    */
   async executeWithRetry<T>(
