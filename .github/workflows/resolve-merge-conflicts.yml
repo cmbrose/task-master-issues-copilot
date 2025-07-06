@@ -94,7 +94,7 @@ jobs:
             else
               echo "Resolving conflict in $file with LLM..."
               llm --model github/o3 \
-                --functions .github/workflows/scripts/resolve-merge-conflicts.py \
+                --functions .github/workflows/scripts/resolve_merge_conflicts.py \
                 --td \
                 --chain-limit 10 \
                 --fragment $file \
