@@ -17,6 +17,8 @@
         "test:generate": "./test/test-generate-workflow.sh",
         "test:issue-creation": "./test/test-issue-creation.sh",
         "test:sub-issues-api": "npx ts-node test/test-sub-issues-api.ts",
+        "test:sub-issue-creation": "npx ts-node test/test-sub-issue-creation.ts",
+        "test:breakdown-integration": "npx ts-node test/test-breakdown-integration.ts",
         "test:dependency-tracking": "npx ts-node test/test-dependency-tracking.ts",
         "test:blocked-status": "npx ts-node test/test-blocked-status.ts",
         "test:enhanced-dependency-scanning": "npx ts-node test/test-enhanced-dependency-scanning.ts",

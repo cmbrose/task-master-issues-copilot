@@ -102,7 +102,7 @@ export function buildSubIssueTitle(task: Task, parentTask?: Task, parentIssueNum
   
   let title: string;
   
-  if (parentTask && parentIssueNumber) {
+  if (parentIssueNumber) {
     // For breakdown sub-issues, reference the parent issue number
     title = `${priorityPrefix}[#${parentIssueNumber}.${task.id}] ${task.title}`;
   } else if (parentTask && 'id' in task) {
