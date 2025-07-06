@@ -114,6 +114,8 @@ async function uploadTaskGraphArtifact(
 ): Promise<void> {
   core.info('📤 Uploading task graph as artifact with metadata...');
   
+  let tempArtifactDir: string | undefined;
+  
   try {
     // Read and parse task graph for metadata
     const taskGraphContent = fs.readFileSync(taskGraphPath, 'utf8');
@@ -181,10 +183,21 @@ async function uploadTaskGraphArtifact(
     // Create artifact client
     const artifactClient = new DefaultArtifactClient();
     
-    // Upload artifact
-    const artifactName = 'task-graph';
-    const files = [taskGraphPath];
-    const rootDirectory = path.dirname(taskGraphPath);
+    // Create the required directory structure for artifacts/taskmaster/task-graph.json
+    tempArtifactDir = path.join(process.cwd(), 'temp_artifacts');
+    const artifactTaskmasterDir = path.join(tempArtifactDir, 'artifacts', 'taskmaster');
+    const artifactTaskGraphPath = path.join(artifactTaskmasterDir, 'task-graph.json');
+    
+    // Ensure the directory structure exists
+    fs.mkdirSync(artifactTaskmasterDir, { recursive: true });
+    
+    // Copy the task graph to the required path
+    fs.copyFileSync(taskGraphPath, artifactTaskGraphPath);
+    
+    // Upload artifact with the required directory structure
+    const artifactName = 'taskmaster-artifacts';
+    const files = [artifactTaskGraphPath];
+    const rootDirectory = tempArtifactDir;
     
     const uploadResponse = await artifactClient.uploadArtifact(
       artifactName,
@@ -201,6 +214,7 @@ async function uploadTaskGraphArtifact(
     core.info(`  • Files Uploaded: ${uploadResponse.size || 'unknown'} bytes`);
     core.info(`  • Upload ID: ${uploadResponse.id || 'unknown'}`);
     core.info(`  • Upload URL: Available in GitHub Actions UI`);
+    core.info(`  • Artifact Path: artifacts/taskmaster/task-graph.json`);
     
     // Set outputs for other steps
     if (uploadResponse.id) {
@@ -221,6 +235,16 @@ async function uploadTaskGraphArtifact(
     core.error(`❌ Artifact upload failed: ${errorMessage}`);
     core.setFailed(errorMessage);
     throw error;
+  } finally {
+    // Clean up temporary directory
+    if (tempArtifactDir) {
+      try {
+        fs.rmSync(tempArtifactDir, { recursive: true, force: true });
+        core.info(`🧹 Cleaned up temporary artifact directory`);
+      } catch (cleanupError) {
+        core.warning(`⚠️ Failed to clean up temporary directory: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+      }
+    }
   }
 }
 

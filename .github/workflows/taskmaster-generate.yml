@@ -121,21 +121,13 @@ jobs:
           GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_PR_TITLE: ${{ github.event.pull_request.title }}
 
-      - name: Upload Task Graph Artifact
-        if: steps.taskmaster-generate.outputs.task-graph
-        uses: actions/upload-artifact@v4
-        with:
-          name: task-graph-${{ github.run_id }}
-          path: ${{ steps.taskmaster-generate.outputs.task-graph }}
-          retention-days: 30
-
       - name: Summary
         run: |
           echo "## 📊 Taskmaster Generate Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Dry-run Mode**: ${{ env.DRY_RUN }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Task Graph**: ${{ steps.taskmaster-generate.outputs.task-graph && 'Generated and uploaded as artifact' || 'Not generated' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Task Graph**: ${{ steps.taskmaster-generate.outputs.task-graph && 'Generated and uploaded to artifacts/taskmaster/task-graph.json' || 'Not generated' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Issues Created**: ${{ steps.taskmaster-generate.outputs.issues-created || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
