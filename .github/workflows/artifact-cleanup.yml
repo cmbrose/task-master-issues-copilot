@@ -1,0 +1,97 @@
+name: Artifact Cleanup
+
+on:
+  # Run cleanup daily at 2 AM UTC
+  schedule:
+    - cron: '0 2 * * *'
+  
+  # Manual dispatch for testing and one-off cleanup
+  workflow_dispatch:
+    inputs:
+      max-artifacts-count:
+        description: 'Maximum number of artifacts to keep'
+        required: false
+        default: '10'
+        type: string
+      retention-days:
+        description: 'Number of days to keep artifacts'
+        required: false
+        default: '30'
+        type: string
+      dry-run:
+        description: 'Run in dry-run mode (no actual deletion)'
+        required: false
+        default: false
+        type: boolean
+      preserve-successful-runs:
+        description: 'Preserve artifacts from successful runs'
+        required: false
+        default: true
+        type: boolean
+      artifact-name-pattern:
+        description: 'Pattern to match artifact names'
+        required: false
+        default: 'task-graph*'
+        type: string
+
+permissions:
+  actions: write  # Required to delete artifacts
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    name: Clean Up Old Artifacts
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Log Cleanup Information
+        run: |
+          echo "🧹 Artifact Cleanup triggered by: ${{ github.event_name }}"
+          
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "👤 Triggered manually by: ${{ github.actor }}"
+            echo "⚙️ Parameters:"
+            echo "  • Max artifacts count: ${{ inputs.max-artifacts-count }}"
+            echo "  • Retention days: ${{ inputs.retention-days }}"
+            echo "  • Dry run: ${{ inputs.dry-run }}"
+            echo "  • Preserve successful runs: ${{ inputs.preserve-successful-runs }}"
+            echo "  • Artifact name pattern: ${{ inputs.artifact-name-pattern }}"
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo "⏰ Triggered by scheduled cron job"
+            echo "⚙️ Using default retention policies"
+          fi
+
+      - name: Run Artifact Cleanup
+        id: cleanup
+        uses: ./actions/artifact-cleanup
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          max-artifacts-count: ${{ github.event_name == 'workflow_dispatch' && inputs.max-artifacts-count || '10' }}
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && inputs.retention-days || '30' }}
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || false }}
+          preserve-successful-runs: ${{ github.event_name == 'workflow_dispatch' && inputs.preserve-successful-runs || true }}
+          artifact-name-pattern: ${{ github.event_name == 'workflow_dispatch' && inputs.artifact-name-pattern || 'task-graph*' }}
+
+      - name: Summary
+        run: |
+          echo "## 🧹 Artifact Cleanup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry-run Mode**: ${{ steps.cleanup.outputs.dry-run-mode }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifacts Deleted**: ${{ steps.cleanup.outputs.artifacts-deleted }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifacts Preserved**: ${{ steps.cleanup.outputs.artifacts-preserved }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ steps.cleanup.outputs.dry-run-mode }}" == "true" ]]; then
+            echo "🎯 **DRY-RUN MODE**: This execution analyzed artifacts without deleting them." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ steps.cleanup.outputs.artifacts-deleted }}" -gt "0" ]]; then
+            echo "✅ Cleanup completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ No artifacts needed cleanup" >> $GITHUB_STEP_SUMMARY
+          fi

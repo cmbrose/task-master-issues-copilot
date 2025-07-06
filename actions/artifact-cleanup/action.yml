@@ -1,0 +1,72 @@
+name: 'Artifact Cleanup'
+description: 'Clean up old artifacts based on retention policies'
+author: 'Taskmaster Team'
+
+inputs:
+  # GitHub access configuration
+  github-token:
+    description: 'GitHub token for API access'
+    required: true
+  
+  # Retention policy configuration
+  max-artifacts-count:
+    description: 'Maximum number of artifacts to keep (older ones will be cleaned up)'
+    required: false
+    default: '10'
+  retention-days:
+    description: 'Number of days to keep artifacts before cleanup'
+    required: false
+    default: '30'
+  
+  # Cleanup behavior configuration
+  dry-run:
+    description: 'Run in dry-run mode (log what would be deleted without deleting)'
+    required: false
+    default: 'false'
+  preserve-successful-runs:
+    description: 'Always preserve artifacts from successful runs even if they exceed limits'
+    required: false
+    default: 'true'
+  artifact-name-pattern:
+    description: 'Pattern to match artifact names for cleanup (supports wildcards)'
+    required: false
+    default: 'task-graph*'
+
+outputs:
+  artifacts-deleted:
+    description: 'Number of artifacts deleted during cleanup'
+  artifacts-preserved:
+    description: 'Number of artifacts preserved (within retention policy)'
+  cleanup-summary:
+    description: 'Summary of cleanup actions performed'
+  dry-run-mode:
+    description: 'Whether cleanup ran in dry-run mode'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Install dependencies
+      run: npm install
+      shell: bash
+      working-directory: ${{ github.action_path }}
+    
+    - name: Run Artifact Cleanup
+      run: npx ts-node src/main.ts
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        INPUT_GITHUB-TOKEN: ${{ inputs.github-token }}
+        INPUT_MAX-ARTIFACTS-COUNT: ${{ inputs.max-artifacts-count }}
+        INPUT_RETENTION-DAYS: ${{ inputs.retention-days }}
+        INPUT_DRY-RUN: ${{ inputs.dry-run }}
+        INPUT_PRESERVE-SUCCESSFUL-RUNS: ${{ inputs.preserve-successful-runs }}
+        INPUT_ARTIFACT-NAME-PATTERN: ${{ inputs.artifact-name-pattern }}
+
+branding:
+  icon: 'trash-2'
+  color: 'orange'

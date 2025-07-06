@@ -45,6 +45,16 @@ on:
         required: false
         default: false
         type: boolean
+      max-artifacts-count:
+        description: 'Maximum number of artifacts to keep (older ones will be cleaned up)'
+        required: false
+        default: '10'
+        type: string
+      retention-days:
+        description: 'Number of days to keep artifacts before cleanup'
+        required: false
+        default: '30'
+        type: string
 
 permissions:
   issues: write
@@ -80,6 +90,8 @@ jobs:
             echo "  • Max depth: ${{ inputs.max-depth }}"
             echo "  • Taskmaster version: ${{ inputs.taskmaster-version }}"
             echo "  • Force download: ${{ inputs.force-download }}"
+            echo "  • Max artifacts count: ${{ inputs.max-artifacts-count }}"
+            echo "  • Retention days: ${{ inputs.retention-days }}"
           elif [[ "${{ github.event_name }}" == "push" ]]; then
             echo "📝 PRD files changed in commit: ${{ github.sha }}"
             echo "👤 Committed by: ${{ github.event.head_commit.author.name }}"
@@ -100,6 +112,8 @@ jobs:
           max-depth: ${{ github.event_name == 'workflow_dispatch' && inputs.max-depth || '3' }}
           taskmaster-version: ${{ github.event_name == 'workflow_dispatch' && inputs.taskmaster-version || '1.0.0' }}
           force-download: ${{ github.event_name == 'workflow_dispatch' && inputs.force-download || false }}
+          max-artifacts-count: ${{ github.event_name == 'workflow_dispatch' && inputs.max-artifacts-count || '10' }}
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && inputs.retention-days || '30' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
         env:
           TASKMASTER_DRY_RUN: ${{ env.DRY_RUN }}
