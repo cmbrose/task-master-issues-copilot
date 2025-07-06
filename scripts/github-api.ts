@@ -45,6 +45,28 @@ export interface GitHubApiConfig {
   operationTimeout?: number;
   /** Batch processing configuration */
   batchConfig?: BatchProcessingConfig;
+  /** Rate limit configuration */
+  rateLimitConfig?: RateLimitConfig;
+}
+
+/**
+ * Configuration for enhanced rate limiting behavior
+ */
+export interface RateLimitConfig {
+  /** Enable pre-emptive throttling (default: true) */
+  enablePreemptiveThrottling?: boolean;
+  /** Threshold for pre-emptive throttling as percentage (default: 0.1 = 10%) */
+  throttlingThreshold?: number;
+  /** Enable adaptive request spacing (default: true) */
+  enableAdaptiveSpacing?: boolean;
+  /** Minimum delay between requests in ms (default: 100) */
+  minRequestDelay?: number;
+  /** Maximum delay between requests in ms (default: 2000) */
+  maxRequestDelay?: number;
+  /** Enable rate limit prediction (default: true) */
+  enablePrediction?: boolean;
+  /** Safety margin for rate limit predictions (default: 0.05 = 5%) */
+  predictionSafetyMargin?: number;
 }
 
 /**
@@ -72,7 +94,7 @@ export interface BatchProcessingConfig {
 }
 
 /**
- * Rate limiting information from GitHub API
+ * Enhanced rate limiting information from GitHub API
  */
 export interface RateLimitInfo {
   /** Remaining requests */
@@ -83,6 +105,14 @@ export interface RateLimitInfo {
   reset: number;
   /** Whether we're currently rate limited */
   isLimited: boolean;
+  /** Pre-emptive throttling threshold reached */
+  isThrottled: boolean;
+  /** Time until rate limit reset in ms */
+  timeToReset: number;
+  /** Percentage of rate limit consumed */
+  usagePercentage: number;
+  /** Estimated time to next safe request */
+  nextSafeRequestTime?: number;
 }
 
 /**
@@ -217,6 +247,38 @@ export interface CircuitBreakerMetrics {
 }
 
 /**
+ * Enhanced rate limit monitoring metrics
+ */
+export interface RateLimitMonitoringMetrics {
+  /** Current rate limit status */
+  currentStatus: RateLimitInfo;
+  /** Total rate limit violations */
+  totalViolations: number;
+  /** Pre-emptive throttling activations */
+  throttlingActivations: number;
+  /** Average rate limit usage over time */
+  averageUsage: number;
+  /** Peak rate limit usage */
+  peakUsage: number;
+  /** Total requests delayed due to rate limiting */
+  delayedRequests: number;
+  /** Total delay time in ms due to rate limiting */
+  totalDelayTime: number;
+  /** Rate limit reset predictions accuracy */
+  predictionAccuracy: number;
+  /** Request timing history for adaptive spacing */
+  requestTimingHistory: Array<{
+    timestamp: number;
+    rateLimitRemaining: number;
+    requestDelay: number;
+  }>;
+  /** Last rate limit reset time */
+  lastResetTime?: Date;
+  /** Average requests per hour */
+  averageRequestsPerHour: number;
+}
+
+/**
  * Request queue item for managing concurrency
  */
 interface QueueItem {
@@ -247,6 +309,11 @@ export class EnhancedGitHubApi {
   private isHealthy = true;
   private lastHealthCheck?: Date;
 
+  // Enhanced rate limit monitoring
+  private rateLimitMonitoring: RateLimitMonitoringMetrics;
+  private lastRequestTime: number = 0;
+  private requestSpacing: number = 0;
+
   constructor(config: GitHubApiConfig) {
     this.config = {
       maxConcurrent: 3,
@@ -270,6 +337,16 @@ export class EnhancedGitHubApi {
         checkpointInterval: 100,
         ...config.batchConfig
       },
+      rateLimitConfig: {
+        enablePreemptiveThrottling: true,
+        throttlingThreshold: 0.1,
+        enableAdaptiveSpacing: true,
+        minRequestDelay: 100,
+        maxRequestDelay: 2000,
+        enablePrediction: true,
+        predictionSafetyMargin: 0.05,
+        ...config.rateLimitConfig
+      },
       ...config
     };
 
@@ -285,6 +362,28 @@ export class EnhancedGitHubApi {
     this.circuitBreaker = {
       state: CircuitBreakerState.CLOSED,
       failureCount: 0
+    };
+
+    // Initialize rate limit monitoring
+    this.rateLimitMonitoring = {
+      currentStatus: {
+        remaining: 5000,
+        limit: 5000,
+        reset: Math.floor(Date.now() / 1000) + 3600,
+        isLimited: false,
+        isThrottled: false,
+        timeToReset: 3600000,
+        usagePercentage: 0,
+      },
+      totalViolations: 0,
+      throttlingActivations: 0,
+      averageUsage: 0,
+      peakUsage: 0,
+      delayedRequests: 0,
+      totalDelayTime: 0,
+      predictionAccuracy: 1.0,
+      requestTimingHistory: [],
+      averageRequestsPerHour: 0
     };
 
     this.octokit = new Octokit({ 
@@ -417,19 +516,50 @@ export class EnhancedGitHubApi {
     }
   }
   /**
-   * Process the request queue with concurrency control
+   * Process the request queue with enhanced rate limit handling
    */
   private async processQueue(): Promise<void> {
     if (this.activeRequests >= this.config.maxConcurrent || this.requestQueue.length === 0) {
       return;
     }
 
-    // Check if we're rate limited
-    if (this.rateLimitInfo?.isLimited) {
-      const waitTime = (this.rateLimitInfo.reset * 1000) - Date.now();
-      if (waitTime > 0) {
-        this.log(`Rate limited. Waiting ${Math.ceil(waitTime / 1000)} seconds`, 'warn');
-        setTimeout(() => this.processQueue(), waitTime);
+    // Enhanced rate limit checking with pre-emptive throttling
+    if (this.rateLimitInfo) {
+      // Check for hard rate limit
+      if (this.rateLimitInfo.isLimited) {
+        const waitTime = this.rateLimitInfo.timeToReset;
+        if (waitTime > 0) {
+          this.log(`Rate limited. Waiting ${Math.ceil(waitTime / 1000)} seconds`, 'warn');
+          this.rateLimitMonitoring.totalViolations++;
+          setTimeout(() => this.processQueue(), waitTime);
+          return;
+        }
+      }
+
+      // Check for pre-emptive throttling
+      if (this.config.rateLimitConfig?.enablePreemptiveThrottling && this.rateLimitInfo.isThrottled) {
+        const throttleDelay = this.calculateThrottlingDelay();
+        if (throttleDelay > 0) {
+          this.log(`Pre-emptive throttling active. Delaying ${throttleDelay}ms`, 'info');
+          this.rateLimitMonitoring.throttlingActivations++;
+          this.rateLimitMonitoring.delayedRequests++;
+          this.rateLimitMonitoring.totalDelayTime += throttleDelay;
+          setTimeout(() => this.processQueue(), throttleDelay);
+          return;
+        }
+      }
+    }
+
+    // Apply adaptive request spacing
+    if (this.config.rateLimitConfig?.enableAdaptiveSpacing) {
+      const now = Date.now();
+      const timeSinceLastRequest = now - this.lastRequestTime;
+      const requiredSpacing = this.calculateAdaptiveSpacing();
+      
+      if (timeSinceLastRequest < requiredSpacing) {
+        const spacing = requiredSpacing - timeSinceLastRequest;
+        this.log(`Adaptive spacing: waiting ${spacing}ms`, 'debug');
+        setTimeout(() => this.processQueue(), spacing);
         return;
       }
     }
@@ -438,6 +568,7 @@ export class EnhancedGitHubApi {
     if (!item) return;
 
     this.activeRequests++;
+    this.lastRequestTime = Date.now();
     
     try {
       const result = await this.executeOperation(item);
@@ -645,71 +776,276 @@ export class EnhancedGitHubApi {
   }
 
   /**
-   * Calculate retry delay with exponential backoff
+   * Calculate retry delay with enhanced exponential backoff and jitter
    */
   private calculateRetryDelay(error: GitHubApiError, retryCount: number): number {
     // Use specific retry-after header if available
     if (error.retryAfter) {
-      return error.retryAfter;
+      // Add small jitter even for retry-after to avoid thundering herd
+      const jitter = this.calculateJitter(error.retryAfter * 0.1);
+      return error.retryAfter + jitter;
     }
 
-    // Different delays for different error types
+    // Different delays for different error types with enhanced jitter
     switch (error.category) {
       case GitHubErrorCategory.RATE_LIMITED:
-        // More aggressive backoff for rate limiting
-        return Math.min(60000, this.config.retryDelay * Math.pow(2, retryCount)); // Max 1 minute
+        // Enhanced exponential backoff for rate limiting with decorrelated jitter
+        const rateBaseDelay = this.config.retryDelay * Math.pow(2, retryCount);
+        const rateMaxDelay = Math.min(60000, rateBaseDelay); // Max 1 minute
+        return this.applyDecorrelatedJitter(rateBaseDelay, rateMaxDelay);
       
       case GitHubErrorCategory.NETWORK:
-        // Faster retry for network issues
-        return Math.min(10000, this.config.retryDelay * Math.pow(1.5, retryCount)); // Max 10 seconds
+        // Faster retry for network issues with equal jitter
+        const networkBaseDelay = this.config.retryDelay * Math.pow(1.5, retryCount);
+        const networkMaxDelay = Math.min(10000, networkBaseDelay); // Max 10 seconds
+        return this.applyEqualJitter(networkBaseDelay, networkMaxDelay);
       
       case GitHubErrorCategory.SERVER:
-        // Standard backoff for server errors
-        return Math.min(30000, this.config.retryDelay * Math.pow(2, retryCount)); // Max 30 seconds
+        // Standard backoff for server errors with full jitter
+        const serverBaseDelay = this.config.retryDelay * Math.pow(2, retryCount);
+        const serverMaxDelay = Math.min(30000, serverBaseDelay); // Max 30 seconds
+        return this.applyFullJitter(serverBaseDelay, serverMaxDelay);
       
       case GitHubErrorCategory.TIMEOUT:
-        // Shorter delays for timeouts
-        return Math.min(5000, this.config.retryDelay * Math.pow(1.2, retryCount)); // Max 5 seconds
+        // Shorter delays for timeouts with exponential jitter
+        const timeoutBaseDelay = this.config.retryDelay * Math.pow(1.2, retryCount);
+        const timeoutMaxDelay = Math.min(5000, timeoutBaseDelay); // Max 5 seconds
+        return this.applyExponentialJitter(timeoutBaseDelay, timeoutMaxDelay);
       
       default:
-        // Standard exponential backoff for other errors
-        const baseDelay = this.config.retryDelay;
-        const jitter = Math.random() * 0.1 * baseDelay; // Add 10% jitter
-        return Math.min(30000, baseDelay * Math.pow(2, retryCount) + jitter); // Max 30 seconds
+        // Standard exponential backoff for other errors with decorrelated jitter
+        const baseDelay = this.config.retryDelay * Math.pow(2, retryCount);
+        const maxDelay = Math.min(30000, baseDelay); // Max 30 seconds
+        return this.applyDecorrelatedJitter(baseDelay, maxDelay);
     }
   }
 
   /**
-   * Update rate limit information from response headers
+   * Apply decorrelated jitter for avoiding thundering herd problems
+   */
+  private applyDecorrelatedJitter(baseDelay: number, maxDelay: number): number {
+    // Decorrelated jitter: random value between base and max with bias towards exponential growth
+    const jitterRange = Math.min(maxDelay, baseDelay * 3);
+    return Math.min(maxDelay, Math.random() * jitterRange + baseDelay);
+  }
+
+  /**
+   * Apply full jitter - completely random delay up to max
+   */
+  private applyFullJitter(baseDelay: number, maxDelay: number): number {
+    return Math.random() * Math.min(maxDelay, baseDelay);
+  }
+
+  /**
+   * Apply equal jitter - base delay plus random component
+   */
+  private applyEqualJitter(baseDelay: number, maxDelay: number): number {
+    const jitter = Math.random() * (Math.min(maxDelay, baseDelay) / 2);
+    return Math.min(maxDelay, baseDelay / 2 + jitter);
+  }
+
+  /**
+   * Apply exponential jitter with capped randomness
+   */
+  private applyExponentialJitter(baseDelay: number, maxDelay: number): number {
+    const jitter = Math.random() * 0.3 * baseDelay; // 30% jitter
+    return Math.min(maxDelay, baseDelay + jitter);
+  }
+
+  /**
+   * Calculate basic jitter for retry-after scenarios
+   */
+  private calculateJitter(maxJitter: number): number {
+    return Math.random() * maxJitter;
+  }
+
+  /**
+   * Calculate throttling delay for pre-emptive rate limiting
+   */
+  private calculateThrottlingDelay(): number {
+    if (!this.rateLimitInfo) return 0;
+
+    const usageRate = this.rateLimitInfo.usagePercentage;
+    const timeToReset = this.rateLimitInfo.timeToReset;
+    
+    // More aggressive throttling as usage increases
+    if (usageRate > 0.9) {
+      return Math.min(2000, timeToReset / this.rateLimitInfo.remaining * 10);
+    } else if (usageRate > 0.8) {
+      return Math.min(1500, timeToReset / this.rateLimitInfo.remaining * 5);
+    } else if (usageRate > 0.7) {
+      return Math.min(1000, timeToReset / this.rateLimitInfo.remaining * 2);
+    }
+    
+    return 0;
+  }
+
+  /**
+   * Calculate adaptive spacing between requests
+   */
+  private calculateAdaptiveSpacing(): number {
+    if (!this.rateLimitInfo) return this.config.rateLimitConfig?.minRequestDelay || 100;
+
+    const { minRequestDelay = 100, maxRequestDelay = 2000 } = this.config.rateLimitConfig || {};
+    const usageRate = this.rateLimitInfo.usagePercentage;
+    
+    // Exponential spacing increase based on usage
+    const spacingMultiplier = 1 + (usageRate * 4); // 1x to 5x multiplier
+    const baseSpacing = minRequestDelay * spacingMultiplier;
+    
+    return Math.min(maxRequestDelay, baseSpacing);
+  }
+
+  /**
+   * Update request timing history for adaptive algorithms
+   */
+  private updateRequestTimingHistory(): void {
+    if (!this.rateLimitInfo) return;
+
+    const now = Date.now();
+    const delay = now - this.lastRequestTime;
+    
+    this.rateLimitMonitoring.requestTimingHistory.push({
+      timestamp: now,
+      rateLimitRemaining: this.rateLimitInfo.remaining,
+      requestDelay: delay
+    });
+
+    // Keep only last 100 requests
+    if (this.rateLimitMonitoring.requestTimingHistory.length > 100) {
+      this.rateLimitMonitoring.requestTimingHistory.shift();
+    }
+
+    // Update average requests per hour
+    this.updateAverageRequestsPerHour();
+  }
+
+  /**
+   * Update average requests per hour calculation
+   */
+  private updateAverageRequestsPerHour(): void {
+    const history = this.rateLimitMonitoring.requestTimingHistory;
+    if (history.length < 2) return;
+
+    const oneHourAgo = Date.now() - 3600000;
+    const recentRequests = history.filter(h => h.timestamp > oneHourAgo);
+    
+    if (recentRequests.length > 0) {
+      const timeSpan = Date.now() - recentRequests[0].timestamp;
+      const requestsPerMs = recentRequests.length / timeSpan;
+      this.rateLimitMonitoring.averageRequestsPerHour = requestsPerMs * 3600000;
+    }
+  }
+
+  /**
+   * Enhanced rate limit information update with monitoring
    */
   private updateRateLimitInfo(headers: any): void {
     const remaining = parseInt(headers['x-ratelimit-remaining']) || 0;
     const limit = parseInt(headers['x-ratelimit-limit']) || 5000;
     const reset = parseInt(headers['x-ratelimit-reset']) || 0;
+    const now = Date.now();
+    const resetTime = reset * 1000;
+    const timeToReset = Math.max(0, resetTime - now);
+    const usagePercentage = (limit - remaining) / limit;
 
+    // Calculate pre-emptive throttling
+    const isThrottled = (this.config.rateLimitConfig?.enablePreemptiveThrottling && 
+                        usagePercentage >= (this.config.rateLimitConfig?.throttlingThreshold || 0.1)) || false;
+
+    // Predict next safe request time
+    const nextSafeRequestTime = (this.config.rateLimitConfig?.enablePrediction) 
+      ? this.predictNextSafeRequestTime(remaining, timeToReset)
+      : undefined;
+
+    const previousRateLimitInfo = this.rateLimitInfo;
     this.rateLimitInfo = {
       remaining,
       limit,
       reset,
-      isLimited: remaining === 0 && reset > Date.now() / 1000
+      isLimited: remaining === 0 && timeToReset > 0,
+      isThrottled,
+      timeToReset,
+      usagePercentage,
+      nextSafeRequestTime
     };
 
-    this.log(`Rate limit: ${remaining}/${limit} remaining, resets at ${new Date(reset * 1000).toISOString()}`, 'info');
+    // Update monitoring metrics
+    this.updateRateLimitMonitoring(previousRateLimitInfo);
 
-    // Set up timer to clear rate limit status
-    if (this.rateLimitInfo.isLimited && this.rateLimitResetTimer) {
+    this.log(`Rate limit: ${remaining}/${limit} remaining (${(usagePercentage * 100).toFixed(1)}%), resets at ${new Date(resetTime).toISOString()}`, 'info');
+
+    // Update request timing history
+    this.updateRequestTimingHistory();
+
+    // Enhanced timer management for automatic resumption
+    if (this.rateLimitResetTimer) {
       clearTimeout(this.rateLimitResetTimer);
     }
     
-    if (this.rateLimitInfo.isLimited) {
-      const waitTime = (reset * 1000) - Date.now();
+    if (this.rateLimitInfo && this.rateLimitInfo.isLimited && timeToReset > 0) {
       this.rateLimitResetTimer = setTimeout(() => {
         if (this.rateLimitInfo) {
           this.rateLimitInfo.isLimited = false;
+          this.rateLimitInfo.isThrottled = false;
+          this.log('Rate limit reset - resuming operations', 'info');
         }
-        this.processQueue(); // Resume processing
-      }, waitTime);
+        this.processQueue(); // Enhanced automatic resumption
+      }, timeToReset);
     }
+  }
+
+  /**
+   * Update rate limit monitoring metrics
+   */
+  private updateRateLimitMonitoring(previousInfo: RateLimitInfo | null): void {
+    if (!this.rateLimitInfo) return;
+
+    this.rateLimitMonitoring.currentStatus = { ...this.rateLimitInfo };
+    
+    // Update peak usage
+    if (this.rateLimitInfo.usagePercentage > this.rateLimitMonitoring.peakUsage) {
+      this.rateLimitMonitoring.peakUsage = this.rateLimitInfo.usagePercentage;
+    }
+
+    // Update average usage (sliding window)
+    const history = this.rateLimitMonitoring.requestTimingHistory;
+    if (history.length > 0) {
+      const recentUsage = history.slice(-10).map(h => {
+        const usage = (this.rateLimitInfo!.limit - h.rateLimitRemaining) / this.rateLimitInfo!.limit;
+        return usage;
+      });
+      this.rateLimitMonitoring.averageUsage = recentUsage.reduce((a, b) => a + b, 0) / recentUsage.length;
+    }
+
+    // Check for rate limit reset
+    if (previousInfo && previousInfo.reset !== this.rateLimitInfo.reset) {
+      this.rateLimitMonitoring.lastResetTime = new Date();
+    }
+  }
+
+  /**
+   * Predict next safe request time to avoid rate limiting
+   */
+  private predictNextSafeRequestTime(remaining: number, timeToReset: number): number | undefined {
+    if (remaining === 0) return Date.now() + timeToReset;
+    
+    const safetyMargin = this.config.rateLimitConfig?.predictionSafetyMargin || 0.05;
+    const reservedRequests = Math.ceil(remaining * safetyMargin);
+    const safeRemaining = remaining - reservedRequests;
+    
+    if (safeRemaining <= 0) {
+      return Date.now() + timeToReset;
+    }
+
+    // Predict based on current request rate
+    const avgRequestsPerHour = this.rateLimitMonitoring.averageRequestsPerHour;
+    if (avgRequestsPerHour > 0) {
+      const estimatedTimeToUseRemaining = (safeRemaining / avgRequestsPerHour) * 3600000;
+      return Date.now() + Math.min(estimatedTimeToUseRemaining, timeToReset);
+    }
+
+    return undefined;
   }
 
   /**
@@ -1070,7 +1406,10 @@ export class EnhancedGitHubApi {
         remaining: core.remaining,
         limit: core.limit,
         reset: core.reset,
-        isLimited: core.remaining === 0 && core.reset > Date.now() / 1000
+        isLimited: core.remaining === 0 && core.reset > Date.now() / 1000,
+        isThrottled: false,
+        timeToReset: Math.max(0, (core.reset * 1000) - Date.now()),
+        usagePercentage: (core.limit - core.remaining) / core.limit,
       };
 
       this.rateLimitInfo = rateLimitInfo;
@@ -1110,6 +1449,44 @@ export class EnhancedGitHubApi {
    */
   getCircuitBreakerStatus(): CircuitBreakerMetrics {
     return { ...this.circuitBreaker };
+  }
+
+  /**
+   * Get enhanced rate limit monitoring metrics
+   */
+  getRateLimitMonitoringMetrics(): RateLimitMonitoringMetrics {
+    return { ...this.rateLimitMonitoring };
+  }
+
+  /**
+   * Get current rate limit status
+   */
+  getCurrentRateLimitStatus(): RateLimitInfo | null {
+    return this.rateLimitInfo ? { ...this.rateLimitInfo } : null;
+  }
+
+  /**
+   * Check if currently rate limited or throttled
+   */
+  isRateLimitedOrThrottled(): boolean {
+    return this.rateLimitInfo ? (this.rateLimitInfo.isLimited || this.rateLimitInfo.isThrottled) : false;
+  }
+
+  /**
+   * Get estimated time until safe to make requests
+   */
+  getTimeUntilSafeRequest(): number {
+    if (!this.rateLimitInfo) return 0;
+    
+    if (this.rateLimitInfo.isLimited) {
+      return this.rateLimitInfo.timeToReset;
+    }
+    
+    if (this.rateLimitInfo.isThrottled) {
+      return this.calculateThrottlingDelay();
+    }
+    
+    return 0;
   }
 
   /**
