@@ -24,10 +24,16 @@ export interface Task {
 
 export interface Issue extends ApiIssue {
   expectedBody: string;
+  number: number;
+  state: string;
+  id: number;
+  title: string;
+  labels: any[];
 }
 
 export interface ParentIssue extends Issue {
   subIssues: ApiIssue[];
+  number: number;
 }
 
 const UNIQUE_MARKER = '<!-- created-by-taskmaster-script -->';
