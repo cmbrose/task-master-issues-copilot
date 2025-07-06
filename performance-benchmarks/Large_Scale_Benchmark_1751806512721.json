@@ -1,0 +1,29 @@
+{
+  "testName": "Large Scale Benchmark",
+  "timestamp": "2025-07-06T12:55:12.721Z",
+  "version": "1.0.0",
+  "environment": {
+    "nodeVersion": "v20.19.2",
+    "platform": "linux",
+    "architecture": "x64",
+    "memory": 387.86328125
+  },
+  "metrics": {
+    "operationsPerSecond": 445.10385756676556,
+    "averageResponseTime": 2.2466666666666666,
+    "memoryUsageMB": 0.00191497802734375,
+    "successRate": 98,
+    "p95ResponseTime": 640.3,
+    "p99ResponseTime": 667.26,
+    "throughput": 445.10385756676556
+  },
+  "metadata": {
+    "itemCount": 300,
+    "concurrency": 3,
+    "testDuration": 674,
+    "configuration": {
+      "environment": "test",
+      "nodeVersion": "v20.19.2"
+    }
+  }
+}
