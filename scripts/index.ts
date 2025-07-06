@@ -154,3 +154,14 @@ export {
   type ResolutionOrder,
   type CriticalPath
 } from './issue-parser';
+
+// Export comment parsing utilities
+export {
+  containsCommand,
+  parseCommand,
+  validateBreakdownArgs,
+  parseBreakdownCommand,
+  type ParsedCommand,
+  type CommandArguments,
+  type CommentParseOptions
+} from './comment-parser';
