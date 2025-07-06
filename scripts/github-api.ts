@@ -43,6 +43,32 @@ export interface GitHubApiConfig {
   enableGracefulDegradation?: boolean;
   /** Operation timeout in ms (default: 30000) */
   operationTimeout?: number;
+  /** Batch processing configuration */
+  batchConfig?: BatchProcessingConfig;
+}
+
+/**
+ * Configuration for batch processing optimization
+ */
+export interface BatchProcessingConfig {
+  /** Enable adaptive batch sizing (default: true) */
+  enableAdaptiveBatching?: boolean;
+  /** Minimum batch size (default: 5) */
+  minBatchSize?: number;
+  /** Maximum batch size (default: 50) */
+  maxBatchSize?: number;
+  /** Base batch size (default: 15) */
+  baseBatchSize?: number;
+  /** Rate limit threshold for batch size adjustment (default: 0.2) */
+  rateLimitThreshold?: number;
+  /** Error rate threshold for batch size reduction (default: 0.1) */
+  errorRateThreshold?: number;
+  /** Enable batch retry on partial failure (default: true) */
+  enableBatchRetry?: boolean;
+  /** Enable progress checkpointing (default: true) */
+  enableCheckpointing?: boolean;
+  /** Maximum operations per checkpoint (default: 100) */
+  checkpointInterval?: number;
 }
 
 /**
@@ -91,6 +117,62 @@ export enum OperationPriority {
   HIGH = 'high',           // Important (create/update issues)
   MEDIUM = 'medium',       // Nice to have (list operations)
   LOW = 'low'             // Optional (metrics, cache updates)
+}
+
+/**
+ * Batch operation result for tracking success/failure rates
+ */
+export interface BatchOperationResult<T> {
+  /** Successfully processed items */
+  successful: Array<{ item: T; result: any }>;
+  /** Failed items with their errors */
+  failed: Array<{ item: T; error: GitHubApiError }>;
+  /** Processing metrics */
+  metrics: BatchMetrics;
+}
+
+/**
+ * Metrics for batch processing performance
+ */
+export interface BatchMetrics {
+  /** Total items processed */
+  totalItems: number;
+  /** Successful operations */
+  successfulItems: number;
+  /** Failed operations */
+  failedItems: number;
+  /** Processing time in milliseconds */
+  processingTimeMs: number;
+  /** Batch size used */
+  batchSize: number;
+  /** Number of batches processed */
+  batchCount: number;
+  /** Average operations per second */
+  operationsPerSecond: number;
+  /** Rate limit info at completion */
+  rateLimitInfo?: RateLimitInfo;
+}
+
+/**
+ * Progress checkpoint for large operations
+ */
+export interface ProcessingCheckpoint {
+  /** Total items to process */
+  totalItems: number;
+  /** Items processed so far */
+  processedItems: number;
+  /** Items successfully completed */
+  completedItems: number;
+  /** Items that failed */
+  failedItems: number;
+  /** Current batch size being used */
+  currentBatchSize: number;
+  /** Processing start time */
+  startTime: Date;
+  /** Last update time */
+  lastUpdateTime: Date;
+  /** Estimated completion time */
+  estimatedCompletionTime?: Date;
 }
 
 /**
@@ -176,6 +258,18 @@ export class EnhancedGitHubApi {
       circuitBreakerTimeout: 60000,
       enableGracefulDegradation: true,
       operationTimeout: 30000,
+      batchConfig: {
+        enableAdaptiveBatching: true,
+        minBatchSize: 5,
+        maxBatchSize: 50,
+        baseBatchSize: 15,
+        rateLimitThreshold: 0.2,
+        errorRateThreshold: 0.1,
+        enableBatchRetry: true,
+        enableCheckpointing: true,
+        checkpointInterval: 100,
+        ...config.batchConfig
+      },
       ...config
     };
 
@@ -1096,6 +1190,297 @@ export class EnhancedGitHubApi {
     });
     
     this.log('Error metrics cleared', 'info');
+  }
+
+  /**
+   * Calculate optimal batch size based on current conditions
+   */
+  private calculateOptimalBatchSize(operationType: string = 'default'): number {
+    const batchConfig = this.config.batchConfig || {};
+    const {
+      enableAdaptiveBatching = true,
+      minBatchSize = 5,
+      maxBatchSize = 50,
+      baseBatchSize = 15,
+      rateLimitThreshold = 0.2,
+      errorRateThreshold = 0.1
+    } = batchConfig;
+
+    if (!enableAdaptiveBatching) {
+      return baseBatchSize;
+    }
+
+    let optimalSize = baseBatchSize;
+
+    // Adjust based on rate limit status
+    if (this.rateLimitInfo) {
+      const rateLimitRatio = this.rateLimitInfo.remaining / this.rateLimitInfo.limit;
+      
+      if (rateLimitRatio < rateLimitThreshold) {
+        // Low rate limit remaining, reduce batch size
+        optimalSize = Math.max(minBatchSize, Math.floor(optimalSize * 0.5));
+        this.log(`Reducing batch size to ${optimalSize} due to low rate limit (${this.rateLimitInfo.remaining}/${this.rateLimitInfo.limit})`, 'info');
+      } else if (rateLimitRatio > 0.8) {
+        // High rate limit available, can increase batch size
+        optimalSize = Math.min(maxBatchSize, Math.floor(optimalSize * 1.5));
+      }
+    }
+
+    // Adjust based on recent error rates
+    const recentErrors = this.errorMetrics.recentFailures.filter(
+      failure => Date.now() - failure.timestamp.getTime() < 300000 // Last 5 minutes
+    );
+    
+    if (recentErrors.length > 0) {
+      const errorRate = recentErrors.length / Math.max(1, this.errorMetrics.total);
+      if (errorRate > errorRateThreshold) {
+        optimalSize = Math.max(minBatchSize, Math.floor(optimalSize * 0.7));
+        this.log(`Reducing batch size to ${optimalSize} due to high error rate (${(errorRate * 100).toFixed(1)}%)`, 'warn');
+      }
+    }
+
+    // Adjust based on circuit breaker state
+    if (this.circuitBreaker.state === CircuitBreakerState.HALF_OPEN) {
+      optimalSize = Math.max(minBatchSize, Math.floor(optimalSize * 0.3));
+      this.log(`Reducing batch size to ${optimalSize} due to circuit breaker in half-open state`, 'warn');
+    }
+
+    return Math.max(minBatchSize, Math.min(maxBatchSize, optimalSize));
+  }
+
+  /**
+   * Process items in optimized batches with adaptive sizing and retry logic
+   */
+  async processBatch<T, R>(
+    items: T[],
+    processor: (item: T) => Promise<R>,
+    options: {
+      operationType?: string;
+      priority?: OperationPriority;
+      enableRetry?: boolean;
+      enableCheckpointing?: boolean;
+      checkpointCallback?: (checkpoint: ProcessingCheckpoint) => Promise<void>;
+    } = {}
+  ): Promise<BatchOperationResult<T>> {
+    const {
+      operationType = 'batch-operation',
+      priority = OperationPriority.MEDIUM,
+      enableRetry = true,
+      enableCheckpointing = true,
+      checkpointCallback
+    } = options;
+
+    const startTime = Date.now();
+    const successful: Array<{ item: T; result: R }> = [];
+    const failed: Array<{ item: T; error: GitHubApiError }> = [];
+    
+    let processedCount = 0;
+    let currentBatchSize = this.calculateOptimalBatchSize(operationType);
+    const checkpointInterval = this.config.batchConfig?.checkpointInterval || 100;
+
+    this.log(`Starting batch processing of ${items.length} items with initial batch size ${currentBatchSize}`, 'info');
+
+    for (let i = 0; i < items.length; i += currentBatchSize) {
+      const batch = items.slice(i, i + currentBatchSize);
+      const batchStartTime = Date.now();
+
+      this.log(`Processing batch ${Math.floor(i / currentBatchSize) + 1}/${Math.ceil(items.length / currentBatchSize)} (${batch.length} items)`, 'debug');
+
+      // Process batch items concurrently
+      const batchResults = await Promise.allSettled(
+        batch.map(async (item) => {
+          try {
+            const result = await this.executeWithRetry(
+              () => processor(item),
+              operationType,
+              priority
+            );
+            return { item, result };
+          } catch (error) {
+            // Convert to GitHubApiError if needed
+            const apiError = error instanceof Error 
+              ? this.categorizeError(error)
+              : new Error(String(error)) as GitHubApiError;
+            apiError.operation = operationType;
+            throw { item, error: apiError };
+          }
+        })
+      );
+
+      // Process results
+      for (const result of batchResults) {
+        if (result.status === 'fulfilled') {
+          successful.push(result.value);
+        } else {
+          const { item, error } = result.reason;
+          failed.push({ item, error });
+          
+          // Log individual failures
+          this.log(`Failed to process item: ${error.message}`, 'warn');
+        }
+      }
+
+      processedCount += batch.length;
+
+      // Update batch size based on performance
+      const batchDuration = Date.now() - batchStartTime;
+      const itemsPerSecond = batch.length / (batchDuration / 1000);
+      
+      if (itemsPerSecond < 1 && currentBatchSize > 5) {
+        // Performance is poor, reduce batch size
+        currentBatchSize = Math.max(5, Math.floor(currentBatchSize * 0.8));
+        this.log(`Reducing batch size to ${currentBatchSize} due to poor performance (${itemsPerSecond.toFixed(2)} items/sec)`, 'info');
+      } else if (itemsPerSecond > 3 && currentBatchSize < 50) {
+        // Performance is good, can increase batch size
+        currentBatchSize = Math.min(50, Math.floor(currentBatchSize * 1.2));
+      }
+
+      // Checkpointing
+      if (enableCheckpointing && checkpointCallback && processedCount % checkpointInterval === 0) {
+        const checkpoint: ProcessingCheckpoint = {
+          totalItems: items.length,
+          processedItems: processedCount,
+          completedItems: successful.length,
+          failedItems: failed.length,
+          currentBatchSize,
+          startTime: new Date(startTime),
+          lastUpdateTime: new Date(),
+          estimatedCompletionTime: this.estimateCompletionTime(startTime, processedCount, items.length)
+        };
+
+        try {
+          await checkpointCallback(checkpoint);
+          this.log(`Checkpoint saved: ${processedCount}/${items.length} items processed`, 'info');
+        } catch (error) {
+          this.log(`Failed to save checkpoint: ${error instanceof Error ? error.message : String(error)}`, 'warn');
+        }
+      }
+
+      // Rate limit protection between batches
+      if (this.rateLimitInfo && this.rateLimitInfo.remaining < 10) {
+        const waitTime = Math.min(60000, 5000 + Math.random() * 5000); // 5-10 seconds
+        this.log(`Rate limit protection: waiting ${waitTime}ms before next batch`, 'info');
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+
+    const totalTime = Date.now() - startTime;
+    const operationsPerSecond = items.length / (totalTime / 1000);
+
+    const metrics: BatchMetrics = {
+      totalItems: items.length,
+      successfulItems: successful.length,
+      failedItems: failed.length,
+      processingTimeMs: totalTime,
+      batchSize: this.calculateOptimalBatchSize(operationType),
+      batchCount: Math.ceil(items.length / currentBatchSize),
+      operationsPerSecond,
+      rateLimitInfo: this.rateLimitInfo || undefined
+    };
+
+    this.log(`Batch processing completed: ${successful.length}/${items.length} successful (${(successful.length / items.length * 100).toFixed(1)}%) in ${(totalTime / 1000).toFixed(2)}s`, 'info');
+
+    return { successful, failed, metrics };
+  }
+
+  /**
+   * Retry failed batch operations with exponential backoff
+   */
+  async retryFailedBatch<T, R>(
+    failedItems: Array<{ item: T; error: GitHubApiError }>,
+    processor: (item: T) => Promise<R>,
+    options: {
+      operationType?: string;
+      priority?: OperationPriority;
+      maxRetries?: number;
+      backoffMultiplier?: number;
+    } = {}
+  ): Promise<BatchOperationResult<T>> {
+    const {
+      operationType = 'batch-retry',
+      priority = OperationPriority.MEDIUM,
+      maxRetries = 3,
+      backoffMultiplier = 2
+    } = options;
+
+    const retryableItems = failedItems.filter(({ error }) => error.retryable);
+    
+    if (retryableItems.length === 0) {
+      this.log('No retryable items found in failed batch', 'info');
+      return {
+        successful: [],
+        failed: failedItems,
+        metrics: {
+          totalItems: failedItems.length,
+          successfulItems: 0,
+          failedItems: failedItems.length,
+          processingTimeMs: 0,
+          batchSize: 0,
+          batchCount: 0,
+          operationsPerSecond: 0
+        }
+      };
+    }
+
+    this.log(`Retrying ${retryableItems.length} failed items`, 'info');
+
+    let attempt = 1;
+    let remainingItems = retryableItems;
+    const successful: Array<{ item: T; result: R }> = [];
+    const finalFailed: Array<{ item: T; error: GitHubApiError }> = [];
+
+    while (remainingItems.length > 0 && attempt <= maxRetries) {
+      const backoffDelay = 1000 * Math.pow(backoffMultiplier, attempt - 1);
+      
+      if (attempt > 1) {
+        this.log(`Waiting ${backoffDelay}ms before retry attempt ${attempt}`, 'info');
+        await new Promise(resolve => setTimeout(resolve, backoffDelay));
+      }
+
+      this.log(`Retry attempt ${attempt}/${maxRetries} for ${remainingItems.length} items`, 'info');
+
+      const batchResult = await this.processBatch(
+        remainingItems.map(({ item }) => item),
+        processor,
+        { operationType: `${operationType}-retry-${attempt}`, priority }
+      );
+
+      successful.push(...batchResult.successful);
+      remainingItems = batchResult.failed;
+      attempt++;
+    }
+
+    // Any remaining items are permanently failed
+    finalFailed.push(...remainingItems);
+
+    const totalItems = retryableItems.length;
+    const metrics: BatchMetrics = {
+      totalItems,
+      successfulItems: successful.length,
+      failedItems: finalFailed.length,
+      processingTimeMs: 0, // Not tracked for retries
+      batchSize: 0,
+      batchCount: attempt - 1,
+      operationsPerSecond: 0
+    };
+
+    this.log(`Batch retry completed: ${successful.length}/${totalItems} recovered after ${attempt - 1} attempts`, 'info');
+
+    return { successful, failed: finalFailed, metrics };
+  }
+
+  /**
+   * Estimate completion time based on current progress
+   */
+  private estimateCompletionTime(startTime: number, processedItems: number, totalItems: number): Date | undefined {
+    if (processedItems === 0) return undefined;
+    
+    const elapsedTime = Date.now() - startTime;
+    const averageTimePerItem = elapsedTime / processedItems;
+    const remainingItems = totalItems - processedItems;
+    const estimatedRemainingTime = remainingItems * averageTimePerItem;
+    
+    return new Date(Date.now() + estimatedRemainingTime);
   }
 
   /**

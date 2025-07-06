@@ -16,7 +16,12 @@ import {
   ApiIssue,
   type ParsedDependency,
   DependencyGraphAnalyzer,
-  type ParsedIssueData
+  type ParsedIssueData,
+  ArtifactManager,
+  createArtifactManager,
+  type ProcessingCheckpoint,
+  type BatchMetrics,
+  OperationPriority
 } from '../../../scripts/index';
 
 interface BlockedStatusResult {
@@ -28,6 +33,8 @@ interface BlockedStatusResult {
     issuesScanned: number;
     dependencyGraphSize: number;
     cyclesDetected: number;
+    batchMetrics?: BatchMetrics;
+    artifactId?: string;
   };
 }
 
@@ -238,7 +245,7 @@ async function processWebhookMode(githubApi: EnhancedGitHubApi): Promise<Blocked
 
 /**
  * Process blocked status management for full scan mode (all issues)
- * Enhanced with dependency graph analysis and batch processing
+ * Enhanced with dependency graph analysis and optimized batch processing
  */
 async function processFullScanMode(githubApi: EnhancedGitHubApi): Promise<BlockedStatusResult> {
   const startTime = Date.now();
@@ -247,8 +254,14 @@ async function processFullScanMode(githubApi: EnhancedGitHubApi): Promise<Blocke
     dependenciesResolved: 0,
     errors: []
   };
+
+  let artifactManager: ArtifactManager | null = null;
+  let artifactId: string | undefined;
   
   try {
+    // Initialize artifact manager for large-scale operations
+    artifactManager = createArtifactManager();
+    
     // Get all open issues with taskmaster label
     const openIssues = await githubApi.listIssues({
       state: 'open',
@@ -256,6 +269,36 @@ async function processFullScanMode(githubApi: EnhancedGitHubApi): Promise<Blocke
     });
     
     core.info(`Scanning ${openIssues.length} open issues for dependency status updates`);
+    
+    // For large PRDs (500+ tasks), upload current state as artifact
+    if (openIssues.length >= 500) {
+      try {
+        const taskGraph = {
+          issues: openIssues.map(issue => ({
+            number: issue.number,
+            title: issue.title,
+            body: issue.body,
+            labels: issue.labels,
+            state: issue.state
+          })),
+          metadata: {
+            scanType: 'full-scan',
+            timestamp: new Date(),
+            issueCount: openIssues.length
+          }
+        };
+        
+        artifactId = await artifactManager.uploadTaskGraph(taskGraph, {
+          sourcePath: 'dependency-scan',
+          totalTasks: openIssues.length
+        });
+        
+        core.info(`✅ Uploaded task graph artifact for large PRD: ${artifactId}`);
+      } catch (error) {
+        core.warning(`Failed to upload task graph artifact: ${error instanceof Error ? error.message : String(error)}`);
+        // Continue processing even if artifact upload fails
+      }
+    }
     
     // Parse all issues and build dependency graph
     const parsedIssues: ParsedIssueData[] = [];
@@ -290,45 +333,98 @@ async function processFullScanMode(githubApi: EnhancedGitHubApi): Promise<Blocke
       .map(id => openIssues.find(issue => issue.number === id))
       .filter((issue): issue is ApiIssue => Boolean(issue));
     
-    // Process in batches
-    const batchSize = 15;
-    for (let i = 0; i < issuesToProcess.length; i += batchSize) {
-      const batch = issuesToProcess.slice(i, i + batchSize);
-      
-      await Promise.allSettled(batch.map(async (issue) => {
-        try {
-          if (!issue.body) return;
+    // Use optimized batch processing with adaptive sizing
+    const batchResult = await githubApi.processBatch(
+      issuesToProcess,
+      async (issue) => {
+        if (!issue.body) return null;
+        
+        const parsed = parseIssueBody(issue.body);
+        const dependencies = parsed.dependencies;
+        
+        if (dependencies.length === 0) return null;
+        
+        const newDependencyLabels = updateDependencyLabels(dependencies);
+        const currentLabels = issue.labels?.map(label => 
+          typeof label === 'string' ? label : label.name
+        ).filter((label): label is string => Boolean(label)) || [];
+        
+        // Check if labels need updating
+        const hasBlocked = currentLabels.some(label => label.startsWith('blocked'));
+        const hasReady = currentLabels.includes('ready');
+        const shouldBeBlocked = newDependencyLabels.some(label => label.startsWith('blocked'));
+        const shouldBeReady = newDependencyLabels.includes('ready');
+        
+        if ((hasBlocked !== shouldBeBlocked) || (hasReady !== shouldBeReady)) {
+          await updateIssueStatus(githubApi, issue, newDependencyLabels);
           
-          const parsed = parseIssueBody(issue.body);
-          const dependencies = parsed.dependencies;
-          
-          if (dependencies.length === 0) return;
-          
-          const newDependencyLabels = updateDependencyLabels(dependencies);
-          const currentLabels = issue.labels?.map(label => 
-            typeof label === 'string' ? label : label.name
-          ).filter((label): label is string => Boolean(label)) || [];
-          
-          // Check if labels need updating
-          const hasBlocked = currentLabels.some(label => label.startsWith('blocked'));
-          const hasReady = currentLabels.includes('ready');
-          const shouldBeBlocked = newDependencyLabels.some(label => label.startsWith('blocked'));
-          const shouldBeReady = newDependencyLabels.includes('ready');
-          
-          if ((hasBlocked !== shouldBeBlocked) || (hasReady !== shouldBeReady)) {
-            await updateIssueStatus(githubApi, issue, newDependencyLabels);
-            result.issuesUpdated++;
-            
-            if (shouldBeReady && !hasReady) {
-              result.dependenciesResolved++;
-            }
-          }
-        } catch (error) {
-          const errorMsg = `Failed to process issue #${issue.number}: ${error instanceof Error ? error.message : String(error)}`;
-          result.errors.push(errorMsg);
-          core.error(errorMsg);
+          return {
+            issueNumber: issue.number,
+            updated: true,
+            wasReady: hasReady,
+            isReady: shouldBeReady
+          };
         }
-      }));
+        
+        return null;
+      },
+      {
+        operationType: 'dependency-status-update',
+        priority: OperationPriority.HIGH,
+        enableCheckpointing: openIssues.length >= 100,
+        checkpointCallback: artifactManager ? async (checkpoint: ProcessingCheckpoint) => {
+          await artifactManager!.saveCheckpoint(artifactId || 'unknown', checkpoint, {
+            scanType: 'full-scan',
+            resolutionOrder: resolutionOrder.order
+          });
+        } : undefined
+      }
+    );
+    
+    // Process successful results
+    for (const { result: updateResult } of batchResult.successful) {
+      if (updateResult && updateResult.updated) {
+        result.issuesUpdated++;
+        
+        if (updateResult.isReady && !updateResult.wasReady) {
+          result.dependenciesResolved++;
+        }
+      }
+    }
+    
+    // Process failed results
+    for (const { item, error } of batchResult.failed) {
+      const errorMsg = `Failed to process issue #${(item as ApiIssue).number}: ${error.message}`;
+      result.errors.push(errorMsg);
+      core.error(errorMsg);
+    }
+    
+    // Handle failed operations with replay capability
+    if (batchResult.failed.length > 0 && artifactManager && artifactId) {
+      try {
+        const replayId = await artifactManager.createReplayData(
+          artifactId,
+          {
+            totalItems: issuesToProcess.length,
+            processedItems: batchResult.successful.length + batchResult.failed.length,
+            completedItems: batchResult.successful.length,
+            failedItems: batchResult.failed.length,
+            currentBatchSize: batchResult.metrics.batchSize,
+            startTime: new Date(startTime),
+            lastUpdateTime: new Date(),
+            estimatedCompletionTime: new Date()
+          },
+          batchResult.failed.map(({ item, error }) => ({
+            operation: 'update-dependency-status',
+            data: { issueNumber: (item as ApiIssue).number, issue: item },
+            error: error.message
+          }))
+        );
+        
+        core.info(`Created replay data for ${batchResult.failed.length} failed operations: ${replayId}`);
+      } catch (error) {
+        core.warning(`Failed to create replay data: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     
     // Add performance metrics
@@ -336,13 +432,41 @@ async function processFullScanMode(githubApi: EnhancedGitHubApi): Promise<Blocke
       processingTimeMs: Date.now() - startTime,
       issuesScanned: openIssues.length,
       dependencyGraphSize: graph.size,
-      cyclesDetected: cycles.length
+      cyclesDetected: cycles.length,
+      batchMetrics: batchResult.metrics,
+      artifactId
     };
+    
+    // Generate performance report for large operations
+    if (artifactManager && artifactId && openIssues.length >= 100) {
+      try {
+        await artifactManager.generatePerformanceReport(artifactId, {
+          totalItems: issuesToProcess.length,
+          successfulItems: batchResult.successful.length,
+          failedItems: batchResult.failed.length,
+          processingTimeMs: Date.now() - startTime,
+          batchMetrics: [batchResult.metrics],
+          errorBreakdown: batchResult.failed.reduce((acc, { error }) => {
+            acc[error.category] = (acc[error.category] || 0) + 1;
+            return acc;
+          }, {} as Record<string, number>)
+        });
+        
+        core.info(`Performance report generated for operation ${artifactId}`);
+      } catch (error) {
+        core.warning(`Failed to generate performance report: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     
   } catch (error) {
     const errorMsg = `Failed to process full scan mode: ${error instanceof Error ? error.message : String(error)}`;
     result.errors.push(errorMsg);
     core.error(errorMsg);
+  } finally {
+    // Clean up artifact manager
+    if (artifactManager) {
+      artifactManager.cleanup();
+    }
   }
   
   return result;
