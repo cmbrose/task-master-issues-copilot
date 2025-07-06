@@ -30,3 +30,7 @@ actions/*/dist/
 .DS_Store
 
 __pycache__
+
+# Idempotency state files (exclude from git but keep as backup)
+**/idempotency-state.json
+**/idempotency-state.*.json
