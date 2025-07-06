@@ -21,9 +21,12 @@
         "test:integration-hierarchy": "./test/test-integration-hierarchy.sh",
         "test:yaml-parser": "./test/test-yaml-parser.sh",
         "test:cron-scheduling": "./test/test-cron-scheduling.sh",
-        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && npm run test:issue-creation && npm run test:yaml-parser && npm run test:sub-issues-api && npm run test:dependency-tracking && npm run test:blocked-status && npm run test:enhanced-error-handling && npm run test:enhanced-dependency-scanning && npm run test:e2e-hierarchy && npm run test:integration-hierarchy && npm run test:cron-scheduling"
+        "test:batch-processing": "npx ts-node test/test-batch-processing.ts",
+        "test:artifact-capabilities": "npx ts-node test/test-artifact-capabilities.ts",
+        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && npm run test:issue-creation && npm run test:yaml-parser && npm run test:sub-issues-api && npm run test:dependency-tracking && npm run test:blocked-status && npm run test:enhanced-error-handling && npm run test:enhanced-dependency-scanning && npm run test:e2e-hierarchy && npm run test:integration-hierarchy && npm run test:cron-scheduling && npm run test:batch-processing && npm run test:artifact-capabilities"
     },
     "dependencies": {
+        "@actions/artifact": "^2.3.2",
         "@actions/core": "^1.10.1",
         "@actions/github": "^6.0.0",
         "@octokit/openapi-types": "^25.1.0",

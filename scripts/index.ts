@@ -113,11 +113,25 @@ export {
   EnhancedGitHubApi,
   createGitHubApiClient,
   GitHubErrorCategory,
+  CircuitBreakerState,
+  OperationPriority,
   type GitHubApiConfig,
+  type BatchProcessingConfig,
   type GitHubApiError,
   type RateLimitInfo,
-  type ApiIssue
+  type ApiIssue,
+  type BatchOperationResult,
+  type BatchMetrics,
+  type ProcessingCheckpoint
 } from './github-api';
+
+// Export artifact management utilities
+export {
+  ArtifactManager,
+  createArtifactManager,
+  type TaskGraphArtifact,
+  type ReplayData
+} from './artifact-manager';
 
 // Export issue parsing utilities
 export {
