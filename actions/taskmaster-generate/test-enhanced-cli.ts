@@ -113,14 +113,14 @@ This is a test PRD file for validating CLI execution.
       },
       tasks: [
         {
-          id: 'task-1',
+          id: 1,
           title: 'User Authentication System',
           description: 'Implement secure user login and registration',
           complexity: 8,
           dependencies: [],
           subtasks: [
             {
-              id: 'task-1-1',
+              id: 2,
               title: 'Login Form',
               description: 'Create user login interface',
               complexity: 3
@@ -128,11 +128,11 @@ This is a test PRD file for validating CLI execution.
           ]
         },
         {
-          id: 'task-2',
+          id: 3,
           title: 'Data Management Layer',
           description: 'Create CRUD operations for data entities',
           complexity: 6,
-          dependencies: ['task-1'],
+          dependencies: [1],
           subtasks: []
         }
       ]

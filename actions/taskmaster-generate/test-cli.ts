@@ -53,7 +53,7 @@ async function testCliIntegration(): Promise<void> {
       },
       tasks: [
         {
-          id: 'task-1',
+          id: 1,
           title: 'User Authentication',
           description: 'Implement user login functionality',
           complexity: 8,
@@ -61,11 +61,11 @@ async function testCliIntegration(): Promise<void> {
           subtasks: []
         },
         {
-          id: 'task-2', 
+          id: 2, 
           title: 'Data Management',
           description: 'Create data CRUD operations',
           complexity: 6,
-          dependencies: ['task-1'],
+          dependencies: [1],
           subtasks: []
         }
       ]
