@@ -1,12 +1,13 @@
 # Enhanced GitHub API Integration
 
-This document describes the enhanced GitHub API integration with comprehensive error handling, rate limiting, circuit breaker patterns, and graceful degradation implemented for issue #237.
+This document describes the comprehensive GitHub API integration for the Taskmaster system, featuring advanced rate limiting, error handling, and batch processing capabilities implemented for issues #237 and #257.
 
 ## Overview
 
 The enhanced GitHub API integration provides:
 
-- **Rate Limiting Handling**: Automatic detection and handling of GitHub API rate limits with exponential backoff
+- **Advanced Rate Limiting**: Sophisticated detection, pre-emptive throttling, and adaptive request spacing  
+- **Enhanced Exponential Backoff**: Multiple jitter algorithms optimized for different error scenarios
 - **Comprehensive Error Handling**: Categorized error handling with intelligent retry strategies
 - **Circuit Breaker Pattern**: Automatic failure detection and recovery with configurable thresholds
 - **Priority Queue Management**: Request prioritization for critical vs non-critical operations
@@ -21,27 +22,111 @@ The enhanced GitHub API integration provides:
 
 ## Key Features
 
-### 1. Rate Limiting Management
+### 1. Advanced Rate Limiting Management
 
-The system automatically handles GitHub API rate limits:
+The system provides sophisticated rate limit handling with multiple layers of protection:
 
 ```typescript
-// Automatic rate limit detection from response headers
-private updateRateLimitInfo(headers: any): void {
-  const remaining = parseInt(headers['x-ratelimit-remaining']) || 0;
-  const limit = parseInt(headers['x-ratelimit-limit']) || 5000;
-  const reset = parseInt(headers['x-ratelimit-reset']) || 0;
-  // ... automatic handling
+// Enhanced rate limit configuration
+const rateLimitConfig: RateLimitConfig = {
+  enablePreemptiveThrottling: true,
+  throttlingThreshold: 0.1,        // Throttle at 10% remaining
+  enableAdaptiveSpacing: true,
+  minRequestDelay: 100,
+  maxRequestDelay: 2000,
+  enablePrediction: true,
+  predictionSafetyMargin: 0.05     // 5% safety buffer
+};
+
+// Enhanced rate limit status tracking
+interface RateLimitInfo {
+  remaining: number;
+  limit: number;
+  reset: number;
+  isLimited: boolean;
+  isThrottled: boolean;            // Pre-emptive throttling active
+  timeToReset: number;
+  usagePercentage: number;
+  nextSafeRequestTime?: number;    // Predicted safe request time
 }
 ```
 
-**Features:**
-- Real-time rate limit tracking from API response headers
-- Automatic request queuing when rate limited
-- Smart timing based on reset timestamps
-- Progressive backoff for secondary rate limits
+**Enhanced Features:**
+- **Pre-emptive Throttling**: Automatically slows requests before hitting rate limits
+- **Adaptive Request Spacing**: Dynamic delays based on current usage patterns
+- **Rate Limit Prediction**: Estimates safe request timing with configurable safety margins
+- **Real-time Monitoring**: Comprehensive metrics and usage tracking
+- **Intelligent Resumption**: Enhanced automatic processing after rate limit resets
 
-### 2. Enhanced Error Categorization and Retry Logic
+### 2. Enhanced Exponential Backoff with Multiple Jitter Algorithms
+
+Different jitter strategies for optimal retry behavior:
+
+```typescript
+// Enhanced retry delay calculation with specialized jitter
+private calculateRetryDelay(error: GitHubApiError, retryCount: number): number {
+  switch (error.category) {
+    case GitHubErrorCategory.RATE_LIMITED:
+      // Decorrelated jitter to avoid thundering herd
+      return this.applyDecorrelatedJitter(baseDelay, maxDelay);
+    
+    case GitHubErrorCategory.NETWORK:
+      // Equal jitter for network issues
+      return this.applyEqualJitter(baseDelay, maxDelay);
+    
+    case GitHubErrorCategory.SERVER:
+      // Full jitter for server errors
+      return this.applyFullJitter(baseDelay, maxDelay);
+    
+    case GitHubErrorCategory.TIMEOUT:
+      // Exponential jitter for timeouts
+      return this.applyExponentialJitter(baseDelay, maxDelay);
+  }
+}
+```
+
+**Jitter Types:**
+- **Decorrelated Jitter**: Prevents synchronized retries across multiple clients
+- **Full Jitter**: Completely random delays for maximum distribution
+- **Equal Jitter**: Balanced approach between consistency and randomness
+- **Exponential Jitter**: Traditional exponential backoff with controlled randomness
+
+### 3. Rate Limit Monitoring and Metrics
+
+Comprehensive monitoring of rate limit behavior:
+
+```typescript
+interface RateLimitMonitoringMetrics {
+  currentStatus: RateLimitInfo;
+  totalViolations: number;
+  throttlingActivations: number;
+  averageUsage: number;
+  peakUsage: number;
+  delayedRequests: number;
+  totalDelayTime: number;
+  predictionAccuracy: number;
+  requestTimingHistory: Array<{
+    timestamp: number;
+    rateLimitRemaining: number;
+    requestDelay: number;
+  }>;
+  averageRequestsPerHour: number;
+}
+
+// Access monitoring data
+const rateLimitMetrics = githubApi.getRateLimitMonitoringMetrics();
+const currentStatus = githubApi.getCurrentRateLimitStatus();
+const timeUntilSafe = githubApi.getTimeUntilSafeRequest();
+```
+
+**Monitoring Features:**
+- Real-time rate limit status and usage tracking
+- Historical request timing analysis
+- Prediction accuracy measurements
+- Throttling and delay statistics
+- Performance optimization insights
+
+### 4. Enhanced Error Categorization and Retry Logic
 
 Errors are categorized for appropriate handling:
 
@@ -70,7 +155,7 @@ export enum GitHubErrorCategory {
   - **Server errors**: Standard retry (max 30 seconds)
   - **Rate limits**: Aggressive backoff (max 1 minute)
 
-### 3. Circuit Breaker Pattern
+### 5. Circuit Breaker Pattern
 
 Automatic failure detection and recovery:
 
@@ -88,7 +173,7 @@ export enum CircuitBreakerState {
 - Manual reset capabilities for administrative recovery
 - Timeout-based automatic retry attempts
 
-### 4. Priority Queue Management
+### 6. Priority Queue Management
 
 Operations are prioritized for optimal handling:
 
@@ -106,7 +191,7 @@ export enum OperationPriority {
 - Critical operations bypass normal queuing delays
 - Resource allocation based on operation importance
 
-### 5. Enhanced Monitoring and Metrics
+### 7. Enhanced Monitoring and Metrics
 
 Comprehensive error tracking and health monitoring:
 
@@ -124,7 +209,7 @@ const health = await client.performHealthCheck();
 // Returns: { healthy, details: { responseTime, errorRate, ... } }
 ```
 
-### 6. Concurrent Request Management
+### 8. Concurrent Request Management
 
 Request queue system manages API concurrency:
 
@@ -144,7 +229,7 @@ interface QueueItem {
 - Operation categorization for better debugging
 - Graceful degradation under rate limits
 
-### 7. Adaptive Batch Processing (NEW)
+### 9. Adaptive Batch Processing
 
 Intelligent batch processing optimized for large-scale operations:
 
@@ -187,7 +272,7 @@ const result = await githubApi.processBatch(
 - Performance metrics and optimization recommendations
 - Circuit breaker integration for system protection
 
-### 8. Artifact Management and Replay Capabilities (NEW)
+### 10. Artifact Management and Replay Capabilities
 
 Comprehensive storage and replay system for large operations:
 
@@ -219,7 +304,7 @@ await artifactManager.generatePerformanceReport(artifactId, metrics);
 - Performance analytics and recommendations
 - Resource cleanup and management
 
-### 9. Enhanced Issue Management
+### 11. Enhanced Issue Management
 
 Improved issue operations with better idempotency:
 
