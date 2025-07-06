@@ -100,12 +100,12 @@ else
     exit 1
 fi
 
-# Test 7: Check artifact upload
+# Test 7: Check artifact upload (handled by composite action)
 echo "📦 Testing artifact upload configuration..."
-if grep -q "uses: actions/upload-artifact@v4" "$WORKFLOW"; then
-    echo "✅ Artifact upload step found"
+if grep -q "uses: ./actions/taskmaster-generate" "$WORKFLOW"; then
+    echo "✅ Artifact upload handled by composite action"
 else
-    echo "❌ Artifact upload step missing"
+    echo "❌ Taskmaster Generate action missing"
     exit 1
 fi
 
