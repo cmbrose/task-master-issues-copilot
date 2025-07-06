@@ -184,3 +184,11 @@ export {
   type Issue,
   type ParentIssue
 } from './sub-issue-creation';
+
+// Export parent issue state management utilities
+export {
+  ParentIssueStateManager,
+  BreakdownStatus,
+  type ParentIssueState,
+  type BreakdownMetadata
+} from './parent-issue-state-manager';
