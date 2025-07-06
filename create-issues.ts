@@ -15,6 +15,7 @@ import * as dotenv from 'dotenv';
 
 import { components } from "@octokit/openapi-types";
 import { EnhancedGitHubApi, createGitHubApiClient } from './scripts/github-api';
+import { IdempotencyManager } from './scripts/idempotency-manager';
 
 // Types for Node.js globals (process, etc.)
 // If you see type errors, run: npm install --save-dev @types/node
@@ -312,112 +313,214 @@ async function getSubIssues(issue: Issue): Promise<ApiIssue[]> {
 }
 
 async function main() {
-  // Parse JSON
+  // Initialize idempotency manager
+  const idempotencyManager = new IdempotencyManager();
+  
+  // Parse JSON and calculate PRD hash
   const raw = fs.readFileSync(TASKS_PATH, 'utf-8');
   const data: TaskmasterJson = JSON.parse(raw);
   const tasks = data.master.tasks;
-
-  // Create issues for all tasks and subtasks
-  const idToIssue: Record<string, Issue> = {};
-
-  for (const task of tasks) {
-    task.requiredBy = tasks.filter(t => t.dependencies?.find(d => d === task.id));
-
-    // Create parent task
-    const baseIssue = await createOrGetIssue(task);
-    const parentIssue = {
-      ...baseIssue,
-      subIssues: await getSubIssues(baseIssue),
-    };
-    idToIssue[`${task.id}`] = parentIssue;
-
-    // Create subtasks
-    if (task.subtasks) {
-      for (const sub of task.subtasks) {
-        sub.requiredBy = task.subtasks?.filter(t => t.dependencies?.find(d => d === sub.id));
-
-        const subIssue = await createOrGetIssue(sub, task, parentIssue);
-        
-        // Link subtask to parent task
-        await addSubIssue(parentIssue, subIssue);
-
-        const subId = `${task.id}.${sub.id}`;
-        idToIssue[subId] = subIssue;
-      }
-    }
-  }
-
-  // Update issues with dependency links and labels
-  // For parent tasks
-  for (const task of tasks) {
-    const issue = idToIssue[`${task.id}`];
-
-    const depIssues = task.dependencies?.map(depId => idToIssue[`${depId}`]).filter(Boolean);
-    issue.expectedBody = updateIssueWithDependencies(issue.expectedBody, depIssues);
-
-    const reqByIssues = task.requiredBy?.map(reqBy => idToIssue[`${reqBy.id}`]).filter(Boolean);
-    issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
-
-    // Generate updated labels with dependency status
-    const taskId = String(task.id);
-    const complexity = complexityMap[taskId];
-    const baseLabels = generateIssueLabels(task, undefined, complexity);
-    const dependencyLabels = updateDependencyLabels(task, depIssues);
-    const updatedLabels = [...baseLabels, ...dependencyLabels];
-
-    // Update issue if body or labels need updating
-    const needsUpdate = issue.expectedBody !== issue.body;
+  
+  // Calculate content hash for the current task graph
+  const taskGraphContent = JSON.stringify(data, null, 2);
+  const prdState = idempotencyManager.checkPrdState(taskGraphContent, TASKS_PATH);
+  
+  console.log(`📊 Idempotency Check: isProcessed=${prdState.isProcessed}, hasChanged=${prdState.hasChanged}`);
+  
+  // Skip processing if already completed and no changes
+  if (prdState.isProcessed && !prdState.hasChanged && prdState.state?.status === 'completed') {
+    console.log('✅ Task graph already processed successfully, skipping...');
     
-    if (needsUpdate) {
-      await githubApi.updateIssue(issue.number, {
-        body: issue.expectedBody,
-        labels: updatedLabels,
-      });
-      console.log(`Updated issue #${issue.number} with dependencies/required-bys and labels.`);
-    }
+    // Display current state summary
+    const summary = idempotencyManager.getStateSummary();
+    console.log(`📊 Current state: ${summary.totalPrds} PRDs, ${summary.totalIssues} issues tracked`);
+    return;
+  }
+  
+  // Start transaction for atomic operations
+  const transactionId = idempotencyManager.beginTransaction();
+  let contentHash: string | undefined;
+  
+  try {
+    // Record processing start
+    contentHash = idempotencyManager.recordPrdProcessingStart(
+      taskGraphContent, 
+      TASKS_PATH, 
+      `task-graph-${Date.now()}`
+    );
+    
+    console.log(`🔄 Starting processing with content hash: ${contentHash.substring(0, 8)}...`);
 
-      // For subtasks
-    if (task.subtasks) {
-      for (const sub of task.subtasks) {
-        const issue = idToIssue[`${task.id}.${sub.id}`];
+    // Create issues for all tasks and subtasks
+    const idToIssue: Record<string, Issue> = {};
+    const createdIssues: number[] = [];
 
-        const depIssues = sub.dependencies?.map(depId => idToIssue[`${task.id}.${depId}`]).filter(Boolean);
-        issue.expectedBody = updateIssueWithDependencies(issue.expectedBody, depIssues);
+    for (const task of tasks) {
+      task.requiredBy = tasks.filter(t => t.dependencies?.find(d => d === task.id));
 
-        const reqByIssues = sub.requiredBy?.map(reqBy => idToIssue[`${task.id}.${reqBy.id}`]).filter(Boolean);
-        issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
+      // Create parent task
+      const baseIssue = await createOrGetIssue(task);
+      const parentIssue = {
+        ...baseIssue,
+        subIssues: await getSubIssues(baseIssue),
+      };
+      idToIssue[`${task.id}`] = parentIssue;
+      
+      // Record issue creation in idempotency state
+      const taskDependencies = task.dependencies?.map(String) || [];
+      idempotencyManager.recordIssueCreation(
+        parentIssue.number,
+        String(task.id),
+        contentHash,
+        parentIssue.expectedBody,
+        generateIssueLabels(task, undefined, complexityMap[String(task.id)]),
+        taskDependencies
+      );
+      createdIssues.push(parentIssue.number);
 
-        // Generate updated labels for subtask
-        const subTaskId = `${task.id}.${sub.id}`;
-        const subComplexity = complexityMap[subTaskId];
-        const subBaseLabels = generateIssueLabels(sub, task, subComplexity);
-        const subDependencyLabels = updateDependencyLabels(sub, depIssues);
-        const subUpdatedLabels = [...subBaseLabels, ...subDependencyLabels];
+      // Create subtasks
+      if (task.subtasks) {
+        for (const sub of task.subtasks) {
+          sub.requiredBy = task.subtasks?.filter(t => t.dependencies?.find(d => d === sub.id));
 
-        const subNeedsUpdate = issue.expectedBody !== issue.body;
-        
-        if (subNeedsUpdate) {
-          await githubApi.updateIssue(issue.number, {
-            body: issue.expectedBody,
-            labels: subUpdatedLabels,
-          });
-          console.log(`Updated issue #${issue.number} with dependencies/required-bys and labels.`);
+          const subIssue = await createOrGetIssue(sub, task, parentIssue);
+          
+          // Link subtask to parent task
+          await addSubIssue(parentIssue, subIssue);
+
+          const subId = `${task.id}.${sub.id}`;
+          idToIssue[subId] = subIssue;
+          
+          // Record sub-issue creation
+          const subDependencies = sub.dependencies?.map(depId => `${task.id}.${depId}`) || [];
+          idempotencyManager.recordIssueCreation(
+            subIssue.number,
+            subId,
+            contentHash,
+            subIssue.expectedBody,
+            generateIssueLabels(sub, task, complexityMap[subId]),
+            subDependencies,
+            String(task.id)
+          );
+          createdIssues.push(subIssue.number);
         }
       }
     }
-  }
 
-  console.log('All issues created and linked.');
-  
-  // Wait for all pending API requests to complete
-  await githubApi.waitForCompletion();
-  
-  // Log final queue status
-  const queueStatus = githubApi.getQueueStatus();
-  console.log(`Final queue status: ${queueStatus.pending} pending, ${queueStatus.active} active`);
-  
-  // Clean up resources
-  githubApi.destroy();
+    // Update issues with dependency links and labels
+    // For parent tasks
+    for (const task of tasks) {
+      const issue = idToIssue[`${task.id}`];
+
+      const depIssues = task.dependencies?.map(depId => idToIssue[`${depId}`]).filter(Boolean);
+      issue.expectedBody = updateIssueWithDependencies(issue.expectedBody, depIssues);
+
+      const reqByIssues = task.requiredBy?.map(reqBy => idToIssue[`${reqBy.id}`]).filter(Boolean);
+      issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
+
+      // Generate updated labels with dependency status
+      const taskId = String(task.id);
+      const complexity = complexityMap[taskId];
+      const baseLabels = generateIssueLabels(task, undefined, complexity);
+      const dependencyLabels = updateDependencyLabels(task, depIssues);
+      const updatedLabels = [...baseLabels, ...dependencyLabels];
+
+      // Update issue if body or labels need updating
+      const needsUpdate = issue.expectedBody !== issue.body;
+      
+      if (needsUpdate) {
+        await githubApi.updateIssue(issue.number, {
+          body: issue.expectedBody,
+          labels: updatedLabels,
+        });
+        console.log(`Updated issue #${issue.number} with dependencies/required-bys and labels.`);
+        
+        // Record the update in idempotency state
+        idempotencyManager.recordIssueUpdate(
+          issue.number,
+          issue.expectedBody,
+          updatedLabels
+        );
+      }
+
+        // For subtasks
+      if (task.subtasks) {
+        for (const sub of task.subtasks) {
+          const issue = idToIssue[`${task.id}.${sub.id}`];
+
+          const depIssues = sub.dependencies?.map(depId => idToIssue[`${task.id}.${depId}`]).filter(Boolean);
+          issue.expectedBody = updateIssueWithDependencies(issue.expectedBody, depIssues);
+
+          const reqByIssues = sub.requiredBy?.map(reqBy => idToIssue[`${task.id}.${reqBy.id}`]).filter(Boolean);
+          issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
+
+          // Generate updated labels for subtask
+          const subTaskId = `${task.id}.${sub.id}`;
+          const subComplexity = complexityMap[subTaskId];
+          const subBaseLabels = generateIssueLabels(sub, task, subComplexity);
+          const subDependencyLabels = updateDependencyLabels(sub, depIssues);
+          const subUpdatedLabels = [...subBaseLabels, ...subDependencyLabels];
+
+          const subNeedsUpdate = issue.expectedBody !== issue.body;
+          
+          if (subNeedsUpdate) {
+            await githubApi.updateIssue(issue.number, {
+              body: issue.expectedBody,
+              labels: subUpdatedLabels,
+            });
+            console.log(`Updated issue #${issue.number} with dependencies/required-bys and labels.`);
+            
+            // Record the update in idempotency state
+            idempotencyManager.recordIssueUpdate(
+              issue.number,
+              issue.expectedBody,
+              subUpdatedLabels
+            );
+          }
+        }
+      }
+    }
+
+    console.log('All issues created and linked.');
+    
+    // Wait for all pending API requests to complete
+    await githubApi.waitForCompletion();
+    
+    // Record successful completion
+    idempotencyManager.recordPrdProcessingComplete(contentHash, createdIssues);
+    
+    // Commit transaction
+    idempotencyManager.commitTransaction();
+    
+    console.log(`✅ Successfully processed ${createdIssues.length} issues with idempotency tracking`);
+    
+    // Display final state summary
+    const summary = idempotencyManager.getStateSummary();
+    console.log(`📊 Final state: ${summary.totalPrds} PRDs, ${summary.totalIssues} issues, ${summary.processedPrds} completed`);
+    
+  } catch (error) {
+    console.error('❌ Error during processing:', error);
+    
+    // Record failure and rollback transaction
+    if (contentHash) {
+      idempotencyManager.recordPrdProcessingFailure(
+        contentHash, 
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    
+    // Rollback all operations
+    idempotencyManager.rollbackTransaction();
+    
+    // Re-throw error for upstream handling
+    throw error;
+  } finally {
+    // Clean up resources
+    githubApi.destroy();
+    
+    // Clean up old transactions
+    idempotencyManager.cleanupOldTransactions();
+  }
 }
 
 main().catch(async e => {
