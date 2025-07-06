@@ -91,7 +91,7 @@ runs:
       working-directory: ${{ github.action_path }}
     
     - name: Run Taskmaster Breakdown
-      run: npx ts-node src/main.ts
+      run: node breakdown-entry.js
       shell: bash
       working-directory: ${{ github.action_path }}
       env:
