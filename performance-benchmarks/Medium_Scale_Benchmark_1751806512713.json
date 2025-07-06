@@ -1,0 +1,29 @@
+{
+  "testName": "Medium Scale Benchmark",
+  "timestamp": "2025-07-06T12:55:12.713Z",
+  "version": "1.0.0",
+  "environment": {
+    "nodeVersion": "v20.19.2",
+    "platform": "linux",
+    "architecture": "x64",
+    "memory": 387.86328125
+  },
+  "metrics": {
+    "operationsPerSecond": 166.66666666666669,
+    "averageResponseTime": 6,
+    "memoryUsageMB": 0.00177764892578125,
+    "successRate": 96,
+    "p95ResponseTime": 570,
+    "p99ResponseTime": 594,
+    "throughput": 166.66666666666669
+  },
+  "metadata": {
+    "itemCount": 100,
+    "concurrency": 2,
+    "testDuration": 600,
+    "configuration": {
+      "environment": "test",
+      "nodeVersion": "v20.19.2"
+    }
+  }
+}

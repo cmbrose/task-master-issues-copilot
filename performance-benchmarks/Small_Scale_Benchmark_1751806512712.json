@@ -1,0 +1,29 @@
+{
+  "testName": "Small Scale Benchmark",
+  "timestamp": "2025-07-06T12:55:12.712Z",
+  "version": "1.0.0",
+  "environment": {
+    "nodeVersion": "v20.19.2",
+    "platform": "linux",
+    "architecture": "x64",
+    "memory": 387.61328125
+  },
+  "metrics": {
+    "operationsPerSecond": 15.003750937734434,
+    "averageResponseTime": 66.65,
+    "memoryUsageMB": 0.02248382568359375,
+    "successRate": 95,
+    "p95ResponseTime": 1266.35,
+    "p99ResponseTime": 1319.67,
+    "throughput": 15.003750937734434
+  },
+  "metadata": {
+    "itemCount": 20,
+    "concurrency": 1,
+    "testDuration": 1333,
+    "configuration": {
+      "environment": "test",
+      "nodeVersion": "v20.19.2"
+    }
+  }
+}
