@@ -50,6 +50,11 @@
         "test:unit:watch": "jest --watch",
         "test:unit:coverage": "jest --coverage",
         "test:unit:verbose": "jest --verbose",
+        "test:github-api-simple": "./test/test-github-api-simple.sh",
+        "test:integration-framework": "npx ts-node src/tests/integration-test-framework.ts",
+        "test:api-endpoints": "npx ts-node src/tests/api-endpoint-tests.ts",
+        "test:database-integration": "npx ts-node src/tests/database-integration-tests.ts",
+        "test:service-integration": "npx ts-node src/tests/service-integration-tests.ts",
         "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && npm run test:issue-creation && npm run test:yaml-parser && npm run test:sub-issues-api && npm run test:dependency-tracking && npm run test:blocked-status && npm run test:enhanced-error-handling && npm run test:enhanced-dependency-scanning && npm run test:e2e-hierarchy && npm run test:integration-hierarchy && npm run test:artifact-retention && npm run test:artifact-cleanup && npm run test:cron-scheduling && npm run test:batch-processing && npm run test:artifact-capabilities && npm run test:artifact-recovery && npm run test:comment-parser && npm run test:artifact-download-validation && npm run test:enhanced-rate-limit-recovery && npm run test:idempotency-framework && npm run test:idempotency-integration && npm run test:comprehensive-error-handling && npm run test:taskgraph-replay-workflow && npm run test:parent-issue-state && npm run test:preview-comment-generation",
         "test:all:with-unit": "npm run test:unit && npm run test:all"
     },
