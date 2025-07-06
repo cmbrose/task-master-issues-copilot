@@ -172,7 +172,7 @@ class PerformanceValidationSuite {
     try {
       const result = await githubApi.processBatch(
         testData,
-        this.createMockProcessingFunction(),
+        this.createMockProcessingFunction(0.01), // Very low failure rate for baseline tests
         {
           operationType: `baseline-${testName.toLowerCase().replace(' ', '-')}`,
           priority: OperationPriority.MEDIUM,
