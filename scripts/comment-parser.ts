@@ -229,40 +229,169 @@ function normalizeKey(key: string): string {
 }
 
 /**
- * Parse argument value to appropriate type
+ * Parse argument value to appropriate type with enhanced validation
  */
 function parseValue(value: string, errors: string[]): string | number | boolean {
+  // Handle empty or whitespace-only values
+  if (!value || value.trim() === '') {
+    errors.push('Empty argument values are not allowed');
+    return value;
+  }
+
+  const trimmedValue = value.trim();
+  
   // Remove quotes if present
-  if ((value.startsWith('"') && value.endsWith('"')) || 
-      (value.startsWith("'") && value.endsWith("'"))) {
-    return value.slice(1, -1);
+  if ((trimmedValue.startsWith('"') && trimmedValue.endsWith('"')) || 
+      (trimmedValue.startsWith("'") && trimmedValue.endsWith("'"))) {
+    const unquotedValue = trimmedValue.slice(1, -1);
+    // Validate that quoted strings are not empty
+    if (unquotedValue.trim() === '') {
+      errors.push('Quoted strings cannot be empty');
+      return '';
+    }
+    return unquotedValue;
   }
   
-  // Try to parse as number
-  if (/^\d+$/.test(value)) {
-    const num = parseInt(value, 10);
+  // Try to parse as integer
+  if (/^-?\d+$/.test(trimmedValue)) {
+    const num = parseInt(trimmedValue, 10);
     if (!isNaN(num)) {
+      // Check for extremely large numbers that might cause issues
+      if (num > Number.MAX_SAFE_INTEGER || num < Number.MIN_SAFE_INTEGER) {
+        errors.push(`Number ${num} is outside safe integer range`);
+      }
       return num;
     }
   }
   
-  // Try to parse as float
-  if (/^\d+\.\d+$/.test(value)) {
-    const num = parseFloat(value);
-    if (!isNaN(num)) {
+  // Try to parse as float - be more strict about the format
+  if (/^-?\d+\.\d+$/.test(trimmedValue)) {
+    const num = parseFloat(trimmedValue);
+    if (!isNaN(num) && isFinite(num)) {
       return num;
     }
+  }
+  
+  // Check for invalid decimal attempts
+  if (trimmedValue.includes('.') && !/^-?\d+\.\d+$/.test(trimmedValue)) {
+    errors.push(`Invalid decimal number: ${trimmedValue}`);
+    return trimmedValue;
   }
   
   // Try to parse as boolean
-  if (value.toLowerCase() === 'true') return true;
-  if (value.toLowerCase() === 'false') return false;
+  const lowerValue = trimmedValue.toLowerCase();
+  if (lowerValue === 'true') return true;
+  if (lowerValue === 'false') return false;
   
-  return value;
+  // Check for common boolean-like values and provide helpful error messages
+  if (['yes', 'no', '1', '0', 'on', 'off'].includes(lowerValue)) {
+    errors.push(`Use 'true' or 'false' for boolean values, not '${trimmedValue}'`);
+  }
+  
+  return trimmedValue;
 }
 
 /**
- * Validate breakdown command arguments
+ * Enhanced validation configuration for command arguments
+ */
+interface ValidationRule {
+  type: 'number' | 'string' | 'boolean';
+  required?: boolean;
+  min?: number;
+  max?: number;
+  allowedValues?: readonly (string | number | boolean)[];
+  description?: string;
+}
+
+interface ValidationConfig {
+  [key: string]: ValidationRule;
+}
+
+/**
+ * Validation configuration for breakdown command arguments
+ */
+const BREAKDOWN_VALIDATION_CONFIG: ValidationConfig = {
+  maxDepth: {
+    type: 'number',
+    min: 1,
+    max: 5,
+    description: 'Maximum depth for task breakdown (1-5)'
+  },
+  depth: {
+    type: 'number',
+    min: 1,
+    max: 5,
+    description: 'Depth for task breakdown (1-5)'
+  },
+  complexityThreshold: {
+    type: 'number',
+    min: 1,
+    max: 100,
+    description: 'Complexity threshold for task breakdown (1-100)'
+  },
+  threshold: {
+    type: 'number',
+    min: 1,
+    max: 100,
+    description: 'Complexity threshold for task breakdown (1-100)'
+  },
+  complexity: {
+    type: 'number',
+    min: 1,
+    max: 100,
+    description: 'Complexity threshold for task breakdown (1-100)'
+  }
+} as const;
+
+/**
+ * Validate a single argument against its validation rule
+ */
+function validateArgument(
+  key: string, 
+  value: any, 
+  rule: ValidationRule,
+  originalKey?: string
+): string[] {
+  const errors: string[] = [];
+  const displayKey = originalKey || key;
+  
+  // Type validation
+  if (typeof value !== rule.type) {
+    const expectedType = rule.type === 'number' ? 'a number' : 
+                        rule.type === 'boolean' ? 'true or false' : 'a string';
+    errors.push(`Argument '${displayKey}' must be ${expectedType}, got ${typeof value} (${value})`);
+    return errors; // Return early if type is wrong
+  }
+  
+  // Range validation for numbers
+  if (rule.type === 'number' && typeof value === 'number') {
+    if (rule.min !== undefined && value < rule.min) {
+      const desc = rule.description || `${displayKey} value`;
+      errors.push(`${desc}: ${value} is below minimum allowed value of ${rule.min}`);
+    }
+    if (rule.max !== undefined && value > rule.max) {
+      const desc = rule.description || `${displayKey} value`;
+      errors.push(`${desc}: ${value} exceeds maximum allowed value of ${rule.max}`);
+    }
+    
+    // Check for non-integer values where integers are expected
+    if (key.includes('depth') || key.includes('Depth')) {
+      if (!Number.isInteger(value)) {
+        errors.push(`Argument '${displayKey}' must be a whole number, got ${value}`);
+      }
+    }
+  }
+  
+  // Allowed values validation
+  if (rule.allowedValues && !rule.allowedValues.includes(value)) {
+    errors.push(`Argument '${displayKey}' must be one of: ${rule.allowedValues.join(', ')}, got ${value}`);
+  }
+  
+  return errors;
+}
+
+/**
+ * Enhanced validation for breakdown command arguments
  */
 export function validateBreakdownArgs(args: CommandArguments): { 
   isValid: boolean; 
@@ -278,42 +407,112 @@ export function validateBreakdownArgs(args: CommandArguments): {
   const errors: string[] = [];
   const normalized: any = {};
   
-  // Normalize argument names
-  if ('maxDepth' in args) normalized.maxDepth = args.maxDepth;
-  if ('max-depth' in args) normalized.maxDepth = args['max-depth'];
-  if ('depth' in args) normalized.depth = args.depth;
+  // Track original keys for better error messages
+  const keyMappings: { [normalizedKey: string]: string } = {};
   
-  if ('complexityThreshold' in args) normalized.complexityThreshold = args.complexityThreshold;
-  if ('complexity-threshold' in args) normalized.complexityThreshold = args['complexity-threshold'];
-  if ('threshold' in args) normalized.threshold = args.threshold;
-  if ('complexity' in args) normalized.complexity = args.complexity;
+  // Normalize argument names and track original keys
+  const argEntries = Object.entries(args);
+  for (const [originalKey, value] of argEntries) {
+    const normalizedKey = normalizeKey(originalKey);
+    normalized[normalizedKey] = value;
+    keyMappings[normalizedKey] = originalKey;
+  }
   
-  // Validate depth arguments
-  for (const key of ['maxDepth', 'depth']) {
-    if (key in normalized) {
-      const value = normalized[key];
-      if (typeof value !== 'number' || value < 1 || value > 5) {
-        errors.push(`${key} must be a number between 1 and 5, got: ${value}`);
-      }
+  // Validate each known argument
+  for (const [normalizedKey, rule] of Object.entries(BREAKDOWN_VALIDATION_CONFIG)) {
+    if (normalizedKey in normalized) {
+      const value = normalized[normalizedKey];
+      const originalKey = keyMappings[normalizedKey];
+      const argErrors = validateArgument(normalizedKey, value, rule, originalKey);
+      errors.push(...argErrors);
     }
   }
   
-  // Validate threshold/complexity arguments
-  for (const key of ['complexityThreshold', 'threshold', 'complexity']) {
-    if (key in normalized) {
-      const value = normalized[key];
-      if (typeof value !== 'number' || value < 1 || value > 100) {
-        errors.push(`${key} must be a number between 1 and 100, got: ${value}`);
+  // Check for unknown arguments with helpful suggestions
+  const knownKeys = Object.keys(BREAKDOWN_VALIDATION_CONFIG);
+  for (const originalKey of Object.keys(args)) {
+    const normalizedKey = normalizeKey(originalKey);
+    if (!knownKeys.includes(normalizedKey)) {
+      // Provide suggestions for similar argument names using improved similarity matching
+      const suggestions = knownKeys.filter(knownKey => {
+        const lowerNormalized = normalizedKey.toLowerCase();
+        const lowerKnown = knownKey.toLowerCase();
+        
+        // Skip if they're identical
+        if (lowerNormalized === lowerKnown) {
+          return false;
+        }
+        
+        // Check for substring match (partial match)
+        if (lowerKnown.includes(lowerNormalized) || lowerNormalized.includes(lowerKnown)) {
+          return true;
+        }
+        
+        // Check for single character differences (typos)
+        if (Math.abs(lowerNormalized.length - lowerKnown.length) <= 1) {
+          const minLen = Math.min(lowerNormalized.length, lowerKnown.length);
+          let differences = 0;
+          
+          // Compare character by character
+          for (let i = 0; i < minLen; i++) {
+            if (lowerNormalized[i] !== lowerKnown[i]) {
+              differences++;
+              if (differences > 1) break;
+            }
+          }
+          
+          // Add length difference
+          differences += Math.abs(lowerNormalized.length - lowerKnown.length);
+          
+          if (differences <= 1) {
+            return true;
+          }
+        }
+        
+        // Check for similar length with 2 character differences (common typos)
+        if (Math.abs(lowerNormalized.length - lowerKnown.length) <= 2 && 
+            Math.min(lowerNormalized.length, lowerKnown.length) >= 4) {
+          const minLen = Math.min(lowerNormalized.length, lowerKnown.length);
+          let matches = 0;
+          
+          // Count matching characters in same positions
+          for (let i = 0; i < minLen; i++) {
+            if (lowerNormalized[i] === lowerKnown[i]) {
+              matches++;
+            }
+          }
+          
+          // If most characters match, it's likely a typo
+          const matchRatio = matches / minLen;
+          if (matchRatio >= 0.7) {
+            return true;
+          }
+        }
+        
+        return false;
+      });
+      
+      let errorMsg = `Unknown argument: '${originalKey}'`;
+      if (suggestions.length > 0) {
+        errorMsg += `. Did you mean: ${suggestions.join(', ')}?`;
+      } else {
+        errorMsg += `. Valid arguments are: ${knownKeys.join(', ')}`;
       }
+      errors.push(errorMsg);
     }
   }
   
-  // Check for unknown arguments
-  for (const key of Object.keys(args)) {
-    const normalizedKey = normalizeKey(key);
-    if (!['maxDepth', 'depth', 'complexityThreshold', 'threshold', 'complexity'].includes(normalizedKey)) {
-      errors.push(`Unknown argument: ${key}`);
-    }
+  // Check for conflicting arguments
+  const depthArgs = ['maxDepth', 'depth'].filter(key => key in normalized);
+  if (depthArgs.length > 1) {
+    const originalKeys = depthArgs.map(key => keyMappings[key]).join(', ');
+    errors.push(`Cannot specify multiple depth arguments: ${originalKeys}. Use only one.`);
+  }
+  
+  const thresholdArgs = ['complexityThreshold', 'threshold', 'complexity'].filter(key => key in normalized);
+  if (thresholdArgs.length > 1) {
+    const originalKeys = thresholdArgs.map(key => keyMappings[key]).join(', ');
+    errors.push(`Cannot specify multiple threshold arguments: ${originalKeys}. Use only one.`);
   }
   
   return {

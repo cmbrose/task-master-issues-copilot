@@ -547,40 +547,98 @@ async function verifyCliDependencies(binaryInfo: BinaryInfo): Promise<void> {
 }
 
 /**
- * Validate CLI execution arguments
+ * Enhanced validation for CLI execution arguments with detailed error messages
  */
 function validateCliArguments(options: TaskmasterRunOptions): void {
   core.info('📋 Validating CLI arguments...');
 
   const { prdPath, complexityThreshold, maxDepth, timeout } = options;
+  const errors: string[] = [];
 
-  // Validate PRD path
-  if (!prdPath || typeof prdPath !== 'string') {
-    throw new Error('PRD path is required and must be a string');
+  // Validate PRD path - required field
+  if (!prdPath) {
+    errors.push('PRD path is required but was not provided');
+  } else if (typeof prdPath !== 'string') {
+    errors.push(`PRD path must be a string, got ${typeof prdPath} (${prdPath})`);
+  } else if (prdPath.trim() === '') {
+    errors.push('PRD path cannot be empty or whitespace-only');
+  } else {
+    // Additional path validation
+    const trimmedPath = prdPath.trim();
+    if (trimmedPath.includes('..')) {
+      errors.push('PRD path cannot contain relative path components (..)');
+    }
+    if (!trimmedPath.endsWith('.md') && !trimmedPath.includes('*')) {
+      core.warning('⚠️ PRD path should typically end with .md or contain wildcards');
+    }
   }
 
-  // Validate complexity threshold
+  // Validate complexity threshold - optional field with enhanced validation
   if (complexityThreshold !== undefined) {
-    if (typeof complexityThreshold !== 'number' || complexityThreshold < 1 || complexityThreshold > 100) {
-      throw new Error('Complexity threshold must be a number between 1 and 100');
+    if (typeof complexityThreshold !== 'number') {
+      errors.push(`Complexity threshold must be a number, got ${typeof complexityThreshold} (${complexityThreshold})`);
+    } else if (!Number.isInteger(complexityThreshold)) {
+      errors.push(`Complexity threshold must be a whole number, got ${complexityThreshold}`);
+    } else if (complexityThreshold < 1) {
+      errors.push(`Complexity threshold must be at least 1, got ${complexityThreshold}`);
+    } else if (complexityThreshold > 100) {
+      errors.push(`Complexity threshold cannot exceed 100, got ${complexityThreshold}`);
+    } else if (complexityThreshold > 90) {
+      core.warning('⚠️ Very high complexity threshold (>90) may result in minimal task breakdown');
     }
   }
 
-  // Validate max depth
+  // Validate max depth - optional field with enhanced validation
   if (maxDepth !== undefined) {
-    if (typeof maxDepth !== 'number' || maxDepth < 1 || maxDepth > 10) {
-      throw new Error('Max depth must be a number between 1 and 10');
+    if (typeof maxDepth !== 'number') {
+      errors.push(`Max depth must be a number, got ${typeof maxDepth} (${maxDepth})`);
+    } else if (!Number.isInteger(maxDepth)) {
+      errors.push(`Max depth must be a whole number, got ${maxDepth}`);
+    } else if (maxDepth < 1) {
+      errors.push(`Max depth must be at least 1, got ${maxDepth}`);
+    } else if (maxDepth > 10) {
+      errors.push(`Max depth cannot exceed 10, got ${maxDepth}`);
+    } else if (maxDepth > 5) {
+      core.warning('⚠️ Very deep task breakdown (>5 levels) may create excessive granularity');
     }
   }
 
-  // Validate timeout
+  // Validate timeout - optional field with enhanced validation
   if (timeout !== undefined) {
-    if (typeof timeout !== 'number' || timeout < 1000 || timeout > 3600000) { // 1 second to 1 hour
-      throw new Error('Timeout must be a number between 1000ms (1s) and 3600000ms (1h)');
+    if (typeof timeout !== 'number') {
+      errors.push(`Timeout must be a number (milliseconds), got ${typeof timeout} (${timeout})`);
+    } else if (!Number.isInteger(timeout)) {
+      errors.push(`Timeout must be a whole number of milliseconds, got ${timeout}`);
+    } else if (timeout < 1000) {
+      errors.push(`Timeout must be at least 1000ms (1 second), got ${timeout}ms`);
+    } else if (timeout > 3600000) {
+      errors.push(`Timeout cannot exceed 3600000ms (1 hour), got ${timeout}ms`);
+    } else {
+      // Provide helpful time conversion in warning messages
+      const seconds = Math.round(timeout / 1000);
+      const minutes = Math.round(seconds / 60);
+      if (timeout < 5000) {
+        core.warning(`⚠️ Very short timeout (${seconds}s) may cause premature failures`);
+      } else if (timeout > 1800000) { // 30 minutes
+        core.warning(`⚠️ Very long timeout (${minutes} minutes) may delay error detection`);
+      }
     }
   }
 
-  core.info('✅ CLI argument validation completed');
+  // Validate argument combinations
+  if (complexityThreshold !== undefined && maxDepth !== undefined) {
+    if (complexityThreshold > 90 && maxDepth > 3) {
+      core.warning('⚠️ High complexity threshold with deep max depth may result in no task breakdown');
+    }
+  }
+
+  // Throw consolidated error if any validation failed
+  if (errors.length > 0) {
+    const errorMessage = `CLI argument validation failed:\n${errors.map(err => `  - ${err}`).join('\n')}`;
+    throw new Error(errorMessage);
+  }
+
+  core.info('✅ CLI argument validation completed successfully');
 }
 
 /**
