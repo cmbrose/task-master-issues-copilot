@@ -30,11 +30,8 @@
         "test:artifact-capabilities": "npx ts-node test/test-artifact-capabilities.ts",
         "test:artifact-recovery": "npx ts-node test/test-artifact-recovery.ts",
         "test:comment-parser": "npx ts-node test/test-comment-parser.ts",
-<<<<<<< HEAD
         "test:enhanced-validation": "npx ts-node test/test-enhanced-validation.ts",
-=======
         "test:metadata-extractor": "npx ts-node test/test-metadata-extractor.ts",
->>>>>>> origin/main
         "test:artifact-download-validation": "npx ts-node test/test-artifact-download-validation.ts",
         "test:idempotency-framework": "npx ts-node test/test-idempotency-framework.ts",
         "test:idempotency-integration": "npx ts-node test/test-idempotency-integration.ts",
