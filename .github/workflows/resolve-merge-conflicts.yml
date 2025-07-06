@@ -85,7 +85,7 @@ jobs:
           while read file; do
             if [ -z "$file" ]; then
               continue
-            done
+            fi
 
             if [ "$file" == 'package-lock.json' ]; then
               # Handle package.lock manually by just deleting it and reinstalling at the end
