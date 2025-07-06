@@ -1,5 +1,9 @@
 # Task Master Issues
 
+[![CI/CD Pipeline](https://github.com/cmbrose/task-master-issues/actions/workflows/ci-cd-pipeline.yml/badge.svg)](https://github.com/cmbrose/task-master-issues/actions/workflows/ci-cd-pipeline.yml)
+[![Security Scanning](https://github.com/cmbrose/task-master-issues/actions/workflows/security-scanning.yml/badge.svg)](https://github.com/cmbrose/task-master-issues/actions/workflows/security-scanning.yml)
+[![Release](https://github.com/cmbrose/task-master-issues/actions/workflows/release-deployment.yml/badge.svg)](https://github.com/cmbrose/task-master-issues/actions/workflows/release-deployment.yml)
+
 A GitHub Action template for automated task planning and issue management based on Product Requirements Documents (PRDs).
 
 ## Overview
@@ -572,6 +576,41 @@ If you hit GitHub API rate limits:
 1. Use scheduled workflows instead of event-driven for large repositories
 2. Adjust `max-depth` and `complexity-threshold` to reduce API calls
 3. Consider using a GitHub App token for higher rate limits
+
+## CI/CD Pipeline
+
+This repository implements a comprehensive CI/CD pipeline for automated build, test, security scanning, and deployment.
+
+### Pipeline Components
+
+- **Continuous Integration**: Automated build, linting, and testing on every push and pull request
+- **Security Scanning**: Daily vulnerability scans, dependency auditing, and secret detection
+- **Automated Testing**: Unit tests, integration tests, and action validation
+- **Release Management**: Automated GitHub releases and marketplace updates
+- **Quality Gates**: Code coverage, security compliance, and performance validation
+
+### Workflows
+
+- [`ci-cd-pipeline.yml`](.github/workflows/ci-cd-pipeline.yml) - Main CI/CD workflow
+- [`security-scanning.yml`](.github/workflows/security-scanning.yml) - Security and vulnerability scanning  
+- [`release-deployment.yml`](.github/workflows/release-deployment.yml) - Automated releases
+
+### Running Tests Locally
+
+```bash
+# Unit tests
+npm run test:unit
+
+# Integration tests  
+npm run test:triggers
+npm run test:generate
+npm run test:integration-hierarchy
+
+# All tests
+npm run test:all
+```
+
+For detailed CI/CD documentation, see [docs/ci-cd-pipeline.md](docs/ci-cd-pipeline.md).
 
 ## Support
 
