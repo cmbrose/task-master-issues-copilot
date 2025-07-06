@@ -46,7 +46,12 @@
         "test:preview-comment-generation": "npx ts-node test/test-preview-comment-generation.ts",
         "test:integration-pr-workflow": "npx ts-node test/test-integration-pr-workflow.ts",
         "test:edge-cases-preview": "npx ts-node test/test-edge-cases-preview.ts",
-        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && npm run test:issue-creation && npm run test:yaml-parser && npm run test:sub-issues-api && npm run test:dependency-tracking && npm run test:blocked-status && npm run test:enhanced-error-handling && npm run test:enhanced-dependency-scanning && npm run test:e2e-hierarchy && npm run test:integration-hierarchy && npm run test:artifact-retention && npm run test:artifact-cleanup && npm run test:cron-scheduling && npm run test:batch-processing && npm run test:artifact-capabilities && npm run test:artifact-recovery && npm run test:comment-parser && npm run test:artifact-download-validation && npm run test:enhanced-rate-limit-recovery && npm run test:idempotency-framework && npm run test:idempotency-integration && npm run test:comprehensive-error-handling && npm run test:taskgraph-replay-workflow && npm run test:parent-issue-state && npm run test:preview-comment-generation"
+        "test:unit": "jest",
+        "test:unit:watch": "jest --watch",
+        "test:unit:coverage": "jest --coverage",
+        "test:unit:verbose": "jest --verbose",
+        "test:all": "./test/test-triggers.sh && ./test/test-generate-workflow.sh && npm run test:issue-creation && npm run test:yaml-parser && npm run test:sub-issues-api && npm run test:dependency-tracking && npm run test:blocked-status && npm run test:enhanced-error-handling && npm run test:enhanced-dependency-scanning && npm run test:e2e-hierarchy && npm run test:integration-hierarchy && npm run test:artifact-retention && npm run test:artifact-cleanup && npm run test:cron-scheduling && npm run test:batch-processing && npm run test:artifact-capabilities && npm run test:artifact-recovery && npm run test:comment-parser && npm run test:artifact-download-validation && npm run test:enhanced-rate-limit-recovery && npm run test:idempotency-framework && npm run test:idempotency-integration && npm run test:comprehensive-error-handling && npm run test:taskgraph-replay-workflow && npm run test:parent-issue-state && npm run test:preview-comment-generation",
+        "test:all:with-unit": "npm run test:unit && npm run test:all"
     },
     "dependencies": {
         "@actions/artifact": "^2.3.2",
@@ -58,10 +63,13 @@
         "js-yaml": "^4.1.0"
     },
     "devDependencies": {
+        "@types/jest": "^30.0.0",
         "@types/js-yaml": "^4.0.9",
         "@types/node": "^20.19.4",
+        "jest": "^30.0.4",
+        "ts-jest": "^29.4.0",
         "ts-node": "^10.0.0",
-        "typescript": "^5.0.0"
+        "typescript": "^5.8.3"
     },
     "keywords": [
         "github",
