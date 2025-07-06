@@ -13,6 +13,8 @@ import { DefaultArtifactClient } from '@actions/artifact';
 import { setupTaskmasterCli, getTaskmasterConfigFromInputs, runTaskmasterCli, validateTaskGraph } from './taskmaster-cli';
 import { loadConfig, TaskmasterConfig } from '../../../scripts/index';
 import { createGitHubApiClient, EnhancedGitHubApi } from '../../../scripts/github-api';
+import { postTaskGraphPreview, PrCommentConfig } from '../../../scripts/pr-comment-manager';
+import { TaskGraph as MarkdownTaskGraph } from '../../../scripts/markdown-formatter';
 import { components } from "@octokit/openapi-types";
 
 // GitHub API types
@@ -41,6 +43,63 @@ interface TaskGraph {
 }
 
 const UNIQUE_MARKER = '<!-- created-by-taskmaster-script -->';
+
+/**
+ * Calculate complexity score for a task based on various factors
+ */
+function calculateComplexityForTask(task: Task, allTasks: Task[]): number {
+  let complexity = 1; // Base complexity
+  
+  // Add complexity based on description length
+  if (task.description) {
+    complexity += Math.min(task.description.length / 100, 3);
+  }
+  
+  // Add complexity based on details length
+  if (task.details) {
+    complexity += Math.min(task.details.length / 200, 3);
+  }
+  
+  // Add complexity based on number of dependencies
+  if (task.dependencies) {
+    complexity += task.dependencies.length * 0.5;
+  }
+  
+  // Add complexity based on number of subtasks
+  if (task.subtasks) {
+    complexity += task.subtasks.length * 0.3;
+  }
+  
+  // Priority affects complexity
+  switch (task.priority?.toLowerCase()) {
+    case 'critical':
+      complexity += 2;
+      break;
+    case 'high':
+      complexity += 1;
+      break;
+    case 'low':
+      complexity -= 0.5;
+      break;
+  }
+  
+  return Math.min(Math.max(Math.round(complexity), 1), 10);
+}
+
+/**
+ * Check if a task is blocked by dependencies
+ */
+function checkIfTaskIsBlocked(task: Task, allTasks: Task[]): boolean {
+  if (!task.dependencies || task.dependencies.length === 0) {
+    return false;
+  }
+  
+  // Check if any dependencies are not completed
+  return task.dependencies.some(depId => {
+    const depTask = allTasks.find(t => t.id === depId);
+    return depTask && depTask.status !== 'completed' && depTask.status !== 'done';
+  });
+}
 
 /**
  * Calculate task hierarchy depth recursively
@@ -806,6 +865,57 @@ async function run(): Promise<void> {
           core.info(`  • Leaf tasks: ${leafTasks}`);
           core.info(`  • Task hierarchy depth: ${hierarchyDepth}`);
           core.info('🎯 Task graph generated successfully - would create GitHub issues in non-dry-run mode');
+          
+          // Post preview comment on PR if this is a pull_request event
+          const prNumber = process.env.GITHUB_PR_NUMBER;
+          if (github.context.eventName === 'pull_request' && prNumber && config.githubToken) {
+            try {
+              core.info('📝 Posting task graph preview comment to PR...');
+              
+              // Convert task graph to markdown format with complexity and blocked status
+              const markdownTaskGraph: MarkdownTaskGraph = {
+                tasks: taskGraph.tasks.map((task: any) => ({
+                  ...task,
+                  complexityScore: calculateComplexityForTask(task, taskGraph.tasks),
+                  isBlocked: checkIfTaskIsBlocked(task, taskGraph.tasks)
+                })),
+                metadata: {
+                  totalTasks,
+                  leafTasks,
+                  hierarchyDepth,
+                  generationTimestamp: new Date().toISOString(),
+                  complexityThreshold: config.complexityThreshold,
+                  maxDepth: config.maxDepth
+                }
+              };
+              
+              const prCommentConfig: PrCommentConfig = {
+                token: config.githubToken,
+                owner: github.context.repo.owner,
+                repo: github.context.repo.repo,
+                prNumber: parseInt(prNumber, 10),
+                debug: process.env.DEBUG === 'true'
+              };
+              
+              const result = await postTaskGraphPreview(markdownTaskGraph, prCommentConfig, {
+                includeDetails: totalTasks <= 10,
+                useCollapsibleSections: totalTasks > 5,
+                showComplexity: true,
+                showBlockedStatus: true,
+                includeSummary: true
+              });
+              
+              core.info(`✅ Posted task graph preview comment #${result.commentId} (${result.isNew ? 'new' : 'updated'})`);
+              core.setOutput('preview-comment-id', result.commentId.toString());
+              core.setOutput('preview-comment-created', result.isNew.toString());
+              
+            } catch (error) {
+              core.warning(`Failed to post preview comment: ${error instanceof Error ? error.message : String(error)}`);
+              // Don't fail the action if preview comment fails
+            }
+          } else {
+            core.info('⏭️ Skipping preview comment (not a pull request or missing required data)');
+          }
         } else {
           const githubToken = config.githubToken;
           if (!githubToken) {

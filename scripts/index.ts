@@ -192,3 +192,20 @@ export {
   type ParentIssueState,
   type BreakdownMetadata
 } from './parent-issue-state-manager';
+
+// Export markdown formatting utilities
+export {
+  formatTaskGraphMarkdown,
+  formatCompactTaskGraphSummary,
+  type Task as MarkdownTask,
+  type TaskGraph as MarkdownTaskGraph,
+  type MarkdownFormatterOptions
+} from './markdown-formatter';
+
+// Export PR comment management utilities
+export {
+  PrCommentManager,
+  createPrCommentManager,
+  postTaskGraphPreview,
+  type PrCommentConfig
+} from './pr-comment-manager';
