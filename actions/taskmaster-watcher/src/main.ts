@@ -145,11 +145,11 @@ async function updateIssueStatus(
   if (!issue.body) return;
   
   // Get current labels, removing old dependency-related labels
-  const currentLabels = issue.labels?.map(label => 
+  const currentLabels = issue.labels?.map((label: any) => 
     typeof label === 'string' ? label : label.name
-  ).filter((label): label is string => Boolean(label)) || [];
+  ).filter((label: any): label is string => Boolean(label)) || [];
   
-  const filteredLabels = currentLabels.filter(label => 
+  const filteredLabels = currentLabels.filter((label: string) => 
     !label.startsWith('blocked') && label !== 'ready'
   );
   
@@ -345,12 +345,12 @@ async function processFullScanMode(githubApi: EnhancedGitHubApi): Promise<Blocke
         if (dependencies.length === 0) return null;
         
         const newDependencyLabels = updateDependencyLabels(dependencies);
-        const currentLabels = issue.labels?.map(label => 
+        const currentLabels = issue.labels?.map((label: any) => 
           typeof label === 'string' ? label : label.name
-        ).filter((label): label is string => Boolean(label)) || [];
+        ).filter((label: any): label is string => Boolean(label)) || [];
         
         // Check if labels need updating
-        const hasBlocked = currentLabels.some(label => label.startsWith('blocked'));
+        const hasBlocked = currentLabels.some((label: string) => label.startsWith('blocked'));
         const hasReady = currentLabels.includes('ready');
         const shouldBeBlocked = newDependencyLabels.some(label => label.startsWith('blocked'));
         const shouldBeReady = newDependencyLabels.includes('ready');
