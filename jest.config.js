@@ -7,7 +7,11 @@ module.exports = {
     '**/?(*.)+(spec|test).ts'
   ],
   transform: {
-    '^.+\\.ts$': 'ts-jest',
+    '^.+\\.ts$': ['ts-jest', {
+      tsconfig: {
+        types: ['jest', 'node']
+      }
+    }],
   },
   collectCoverageFrom: [
     'scripts/**/*.ts',
@@ -27,13 +31,6 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/src/tests/setup.ts'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/scripts/$1'
-  },
-  globals: {
-    'ts-jest': {
-      tsconfig: {
-        types: ['jest', 'node']
-      }
-    }
   },
   verbose: true
 };

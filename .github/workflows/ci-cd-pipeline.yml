@@ -1,0 +1,395 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'actions/**'
+      - 'scripts/**'
+      - 'src/**'
+      - '*.ts'
+      - '*.js'
+      - '*.json'
+      - '.github/workflows/**'
+      - 'package*.json'
+      - 'tsconfig.json'
+      - 'jest.config.js'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'actions/**'
+      - 'scripts/**'
+      - 'src/**'
+      - '*.ts'
+      - '*.js'
+      - '*.json'
+      - '.github/workflows/**'
+      - 'package*.json'
+      - 'tsconfig.json'
+      - 'jest.config.js'
+  workflow_dispatch:
+    inputs:
+      skip-tests:
+        description: 'Skip test execution'
+        required: false
+        default: 'false'
+        type: boolean
+      deploy:
+        description: 'Deploy after successful build'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+  security-events: write
+  actions: read
+
+jobs:
+  # Build and compile TypeScript
+  build:
+    name: Build and Compile
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      cache-key: ${{ steps.cache.outputs.cache-hit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Cache Dependencies
+        id: cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            node_modules
+            ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install Dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: TypeScript Lint Check
+        run: npm run lint
+
+      - name: Build TypeScript
+        run: npx tsc --noEmit
+
+      - name: Extract Version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-${{ steps.version.outputs.version }}
+          path: |
+            actions/
+            scripts/
+            *.js
+            *.ts
+            package*.json
+            tsconfig.json
+          retention-days: 30
+
+  # Code Quality Checks
+  code-quality:
+    name: Code Quality Analysis
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Security Audit
+        run: npm audit --audit-level moderate
+        continue-on-error: true
+
+      - name: Dependency Check
+        run: |
+          echo "Checking for outdated dependencies..."
+          npm outdated || true
+          echo "Checking for security vulnerabilities..."
+          npx audit-ci --moderate
+        continue-on-error: true
+
+      - name: CodeQL Analysis
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Perform CodeQL Analysis
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: github/codeql-action/analyze@v3
+
+  # Automated Testing
+  test:
+    name: Automated Testing
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event.inputs.skip-tests != 'true' }}
+    strategy:
+      matrix:
+        test-suite:
+          - unit
+          - integration
+          - action-validation
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-${{ needs.build.outputs.version }}
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Unit Tests
+        if: matrix.test-suite == 'unit'
+        run: |
+          npm run test:unit:coverage
+          echo "Unit test coverage generated"
+
+      - name: Run Integration Tests
+        if: matrix.test-suite == 'integration'
+        run: |
+          npm run test:triggers
+          npm run test:generate
+          npm run test:integration-hierarchy
+          echo "Integration tests completed"
+
+      - name: Run Action Validation Tests
+        if: matrix.test-suite == 'action-validation'
+        run: |
+          # Validate individual actions
+          for action in actions/*/; do
+            echo "Validating $action"
+            if [ -f "$action/action.yml" ]; then
+              npx js-yaml "$action/action.yml" > /dev/null
+              echo "✅ $action YAML is valid"
+            fi
+          done
+          echo "Action validation completed"
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.test-suite }}
+          path: |
+            coverage/
+            test-results/
+            *.xml
+            *.json
+          retention-days: 14
+
+      - name: Upload Coverage to Codecov
+        if: matrix.test-suite == 'unit'
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+  # Action Testing
+  action-tests:
+    name: Test GitHub Actions
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    strategy:
+      matrix:
+        action:
+          - taskmaster-generate
+          - taskmaster-breakdown
+          - taskmaster-watcher
+          - composite-root
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test Taskmaster Generate Action
+        if: matrix.action == 'taskmaster-generate'
+        uses: ./actions/taskmaster-generate
+        with:
+          skip-checkout: 'true'
+          complexity-threshold: '50'
+          max-depth: '2'
+          prd-path-glob: 'docs/**.prd.md'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Test Taskmaster Breakdown Action
+        if: matrix.action == 'taskmaster-breakdown'
+        uses: ./actions/taskmaster-breakdown
+        with:
+          skip-checkout: 'true'
+          breakdown-max-depth: '3'
+          complexity-threshold: '30'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Test Taskmaster Watcher Action
+        if: matrix.action == 'taskmaster-watcher'
+        uses: ./actions/taskmaster-watcher
+        with:
+          skip-checkout: 'true'
+          scan-mode: 'full'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Test Composite Root Action
+        if: matrix.action == 'composite-root'
+        uses: ./
+        with:
+          skip-checkout: 'true'
+          action-mode: 'generate'
+          complexity-threshold: '50'
+          max-depth: '2'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Performance Testing
+  performance-tests:
+    name: Performance Validation
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Performance Tests
+        run: |
+          npm run test:performance-validation
+          npm run test:load-testing
+        continue-on-error: true
+
+      - name: Upload Performance Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: |
+            performance-results/
+            performance-benchmarks/
+          retention-days: 30
+
+  # Deployment
+  deploy:
+    name: Deploy and Release
+    runs-on: ubuntu-latest
+    needs: [build, code-quality, test, action-tests]
+    if: |
+      github.event_name == 'push' && 
+      github.ref == 'refs/heads/main' && 
+      (github.event.inputs.deploy == 'true' || contains(github.event.head_commit.message, '[deploy]'))
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-${{ needs.build.outputs.version }}
+
+      - name: Create Release Tag
+        id: tag
+        run: |
+          VERSION=${{ needs.build.outputs.version }}
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          
+          if ! git tag | grep -q "v$VERSION"; then
+            git tag "v$VERSION"
+            git push origin "v$VERSION"
+            echo "tag-created=true" >> $GITHUB_OUTPUT
+            echo "tag-name=v$VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "tag-created=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        if: steps.tag.outputs.tag-created == 'true'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.tag-name }}
+          release_name: Release ${{ steps.tag.outputs.tag-name }}
+          body: |
+            ## Changes in this Release
+            - Automated release from CI/CD pipeline
+            - Build version: ${{ needs.build.outputs.version }}
+            - Commit: ${{ github.sha }}
+            
+            ## Artifacts
+            - GitHub Actions are ready for use
+            - All tests passed
+            - Code quality checks completed
+          draft: false
+          prerelease: false
+
+  # Status Summary
+  pipeline-status:
+    name: Pipeline Status
+    runs-on: ubuntu-latest
+    needs: [build, code-quality, test, action-tests]
+    if: always()
+    steps:
+      - name: Pipeline Summary
+        run: |
+          echo "# CI/CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Status" >> $GITHUB_STEP_SUMMARY
+          echo "- Build: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Code Quality: ${{ needs.code-quality.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Tests: ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Action Tests: ${{ needs.action-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check Pipeline Success
+        if: |
+          needs.build.result == 'failure' ||
+          needs.code-quality.result == 'failure' ||
+          needs.test.result == 'failure' ||
+          needs.action-tests.result == 'failure'
+        run: |
+          echo "Pipeline failed - check individual job results"
+          exit 1
