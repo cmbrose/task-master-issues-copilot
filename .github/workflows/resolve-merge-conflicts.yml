@@ -35,9 +35,9 @@ jobs:
             echo "No PR number provided."
             exit 1
           fi
-          gh pr view $PR_NUMBER --json headRefName,baseRefName -q '.headRefName + "," + .baseRefName' > pr_branches.txt
-          HEAD_BRANCH=$(cut -d, -f1 pr_branches.txt)
-          BASE_BRANCH=$(cut -d, -f2 pr_branches.txt)
+          gh pr view $PR_NUMBER --json headRefName,baseRefName -q '.headRefName + "," + .baseRefName' > /tmp/pr_branches.txt
+          HEAD_BRANCH=$(cut -d, -f1 /tmp/pr_branches.txt)
+          BASE_BRANCH=$(cut -d, -f2 /tmp/pr_branches.txt)
           echo "head_branch=$HEAD_BRANCH" >> $GITHUB_OUTPUT
           echo "base_branch=$BASE_BRANCH" >> $GITHUB_OUTPUT
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
@@ -60,12 +60,12 @@ jobs:
         continue-on-error: true
         run: |
           git merge "origin/${{ steps.prinfo.outputs.base_branch }}" || true
-          git diff --name-only --diff-filter=U > conflict_files.txt
+          git diff --name-only --diff-filter=U > /tmp/conflict_files.txt
 
       - name: Commit and push conflicted merge (if any)
         if: always()
         run: |
-          if [ -s conflict_files.txt ]; then
+          if [ -s /tmp/conflict_files.txt ]; then            
             git add .
             git commit -m "Auto-merge with conflicts for PR #${{ steps.prinfo.outputs.pr_number }}"
             git push --force
@@ -78,6 +78,6 @@ jobs:
             gh pr comment ${{ steps.prinfo.outputs.pr_number }} --body "⚠️ Merge conflicts detected!\nA commit has been made that merges HEAD and retains merge conflict markers.\nPlease resolve the conflicts in that branch and update the PR."
           fi
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.ISSUE_ASSIGNMENT_PAT }}
 
           
