@@ -1,0 +1,6 @@
+{
+  "taskmaster": {
+    "maxArtifactsCount": 15,
+    "retentionDays": 45
+  }
+}
