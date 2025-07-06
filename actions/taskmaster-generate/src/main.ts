@@ -684,12 +684,9 @@ async function run(): Promise<void> {
     core.info(`  • Max depth: ${config.maxDepth}`);
     core.info(`  • PRD path glob: ${config.prdPathGlob}`);
     core.info(`  • Taskmaster version: ${config.taskmasterVersion}`);
-<<<<<<< HEAD
     core.info(`  • Retention days: ${config.retentionDays}`);
     core.info(`  • Max artifacts count: ${config.maxArtifactsCount}`);
-=======
     core.info(`  • Dry-run mode: ${isDryRun}`);
->>>>>>> origin/main
 
     // Set up Taskmaster CLI binary with version pinning
     const taskmasterConfig = {
