@@ -92,6 +92,30 @@ This repository provides GitHub Actions that automatically generate hierarchical
 
 3. **Push to trigger** automatic issue generation from your PRD
 
+## 📚 Complete Documentation
+
+This repository includes comprehensive documentation for all user types:
+
+### 🎯 Quick Access by Role
+- **[Contributors](./docs/user-guide.md#1-contributors-developers-designers-qa)**: Finding and completing work
+- **[Maintainers](./docs/user-guide.md#2-maintainers-tech-leads-senior-engineers)**: System configuration and monitoring  
+- **[Product Managers](./docs/user-guide.md#3-product-managers-pms-product-owners)**: PRD writing and progress tracking
+- **[System Operators](./docs/deployment-guide.md)**: Deployment and maintenance
+
+### 📖 Documentation Index
+- **[User Guide](./docs/user-guide.md)** - Comprehensive guide for all personas
+- **[Deployment Guide](./docs/deployment-guide.md)** - Step-by-step setup instructions
+- **[API Reference](./docs/api-reference.md)** - Complete API documentation
+- **[Developer Guide](./docs/developer-guide.md)** - Development environment and patterns
+- **[Architecture Overview](./docs/architecture-overview.md)** - System design and components
+- **[Documentation Index](./docs/README.md)** - Complete documentation navigation
+
+### 🚀 Getting Started Paths
+- **New to the system?** → [User Guide](./docs/user-guide.md)
+- **Setting up for your team?** → [Deployment Guide](./docs/deployment-guide.md)
+- **Want to contribute code?** → [Developer Guide](./docs/developer-guide.md)
+- **Need API integration?** → [API Reference](./docs/api-reference.md)
+
 ## Trigger Configuration
 
 The Taskmaster workflow supports multiple trigger types with automatic mode detection:

@@ -1,0 +1,57 @@
+# Task Master Issues Configuration Example
+# 
+# Save this as .taskmaster/config.yml in your repository for project-specific settings
+# This configuration matches the examples in the documentation
+
+# Core task generation settings
+complexity_threshold: 4      # Break down tasks larger than 4 hours
+max_depth: 3                # Maximum breakdown recursion depth
+dry_run: false              # Set to true to preview without creating issues
+
+# GitHub API configuration
+github:
+  rate_limit_buffer: 100    # API calls to reserve for critical operations
+  retry_max_attempts: 5     # Maximum retry attempts for failed operations
+  retry_delay_ms: 1000     # Base delay between retries
+
+# Performance settings
+concurrency: 3              # Maximum concurrent API operations
+batch_size: 10              # Number of items to process in each batch
+
+# Artifact management
+artifacts:
+  retention_days: 30        # How long to keep task graph artifacts
+  max_size_mb: 10          # Maximum size for individual artifacts
+  
+# Labeling configuration
+labels:
+  taskmaster: "taskmaster"  # Primary label for all generated issues
+  blocked: "blocked"        # Label for issues with open dependencies
+  ready: "ready"           # Label for issues ready to work on
+  complexity:
+    low: "complexity:low"   # 1-2 hours
+    medium: "complexity:medium"  # 3-4 hours  
+    high: "complexity:high" # 5+ hours (will be broken down)
+
+# Environment-specific configurations
+environments:
+  development:
+    complexity_threshold: 2 # Lower threshold for testing
+    max_depth: 2           # Reduced depth for faster testing
+    artifacts:
+      retention_days: 7    # Shorter retention for dev
+    
+  staging:
+    complexity_threshold: 4
+    max_depth: 3
+    artifacts:
+      retention_days: 14
+      
+  production:
+    complexity_threshold: 4
+    max_depth: 3
+    artifacts:
+      retention_days: 90   # Longer retention for audit
+    monitoring:
+      enabled: true
+      alerts: true
