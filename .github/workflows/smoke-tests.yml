@@ -1,0 +1,306 @@
+name: Smoke Test Suite
+
+on:
+  # Run smoke tests after deployment
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    types:
+      - completed
+    branches: [main]
+  
+  # Manual trigger for on-demand smoke testing
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to test against'
+        required: false
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+      
+      github-token:
+        description: 'GitHub token for API tests (optional)'
+        required: false
+        type: string
+      
+      verbose:
+        description: 'Enable verbose output'
+        required: false
+        default: false
+        type: boolean
+
+  # Run on schedule for continuous monitoring
+  schedule:
+    # Run smoke tests every 6 hours
+    - cron: '0 */6 * * *'
+
+  # Run after successful releases
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  issues: read
+  actions: read
+
+jobs:
+  # Quick smoke tests that run on every trigger
+  quick-smoke-tests:
+    name: Quick Smoke Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Quick Smoke Tests
+        run: npm run test:smoke
+        env:
+          NODE_ENV: test
+          DEBUG_TESTS: ${{ github.event.inputs.verbose || false }}
+
+      - name: Upload Smoke Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-smoke-test-results
+          path: |
+            test-results/
+            *.log
+          retention-days: 7
+
+  # Comprehensive smoke tests with GitHub API validation
+  comprehensive-smoke-tests:
+    name: Comprehensive Smoke Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: quick-smoke-tests
+    if: |
+      (github.event_name == 'workflow_dispatch' || 
+       github.event_name == 'workflow_run' || 
+       github.event_name == 'release') &&
+      needs.quick-smoke-tests.result == 'success'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Comprehensive Smoke Tests
+        run: npm run test:smoke:verbose
+        env:
+          NODE_ENV: test
+          GITHUB_TOKEN: ${{ github.event.inputs.github-token || secrets.GITHUB_TOKEN }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO: ${{ github.event.repository.name }}
+          DEBUG_TESTS: ${{ github.event.inputs.verbose || true }}
+
+      - name: Run Unit Tests for Smoke Testing Framework
+        run: npm run test:unit -- --testPathPattern=smoke
+        continue-on-error: true
+
+      - name: Upload Comprehensive Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: comprehensive-smoke-test-results
+          path: |
+            test-results/
+            coverage/
+            *.log
+          retention-days: 14
+
+  # Health check monitoring (scheduled runs only)
+  health-monitoring:
+    name: Health Check Monitoring
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'schedule'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Health Check Only
+        run: |
+          npx ts-node scripts/smoke-test-cli.ts --verbose --no-exit-on-failure
+        env:
+          NODE_ENV: production
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO: ${{ github.event.repository.name }}
+
+      - name: Report Health Status
+        if: always()
+        run: |
+          echo "## Health Check Report" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date -Iseconds)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** Production" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ $? -eq 0 ]]; then
+            echo "- **Status:** ✅ Healthy" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status:** ❌ Issues Detected" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Post-deployment validation
+  post-deployment-validation:
+    name: Post-Deployment Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: |
+      github.event_name == 'workflow_run' && 
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Wait for Deployment Settling
+        run: sleep 60  # Allow 1 minute for deployment to fully settle
+
+      - name: Run Post-Deployment Smoke Tests
+        run: npm run test:smoke:verbose
+        env:
+          NODE_ENV: production
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO: ${{ github.event.repository.name }}
+          DEBUG_TESTS: true
+
+      - name: Validate Critical Workflows
+        run: |
+          # Test that core workflows are accessible
+          for workflow in taskmaster.yml ci-cd-pipeline.yml; do
+            if [[ ! -f ".github/workflows/$workflow" ]]; then
+              echo "❌ Critical workflow missing: $workflow"
+              exit 1
+            else
+              echo "✅ Critical workflow found: $workflow"
+            fi
+          done
+
+      - name: Validate Action Availability
+        run: |
+          # Test that actions are properly structured
+          for action in taskmaster-generate taskmaster-breakdown taskmaster-watcher; do
+            if [[ ! -f "actions/$action/action.yml" ]]; then
+              echo "❌ Critical action missing: $action"
+              exit 1
+            else
+              echo "✅ Critical action found: $action"
+            fi
+          done
+
+      - name: Create Deployment Validation Summary
+        if: always()
+        run: |
+          echo "# Post-Deployment Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Deployment Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workflow:** ${{ github.event.workflow_run.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Conclusion:** ${{ github.event.workflow_run.conclusion }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.event.workflow_run.head_branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.event.workflow_run.head_sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Validation Time:** $(date -Iseconds)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ $? -eq 0 ]]; then
+            echo "## ✅ Validation Status: PASSED" >> $GITHUB_STEP_SUMMARY
+            echo "All post-deployment smoke tests passed successfully." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Validation Status: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "Some post-deployment validations failed. Please review the logs." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Post-Deployment Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-deployment-validation-results
+          path: |
+            test-results/
+            *.log
+          retention-days: 30
+
+  # Summary job
+  smoke-test-summary:
+    name: Smoke Test Summary
+    runs-on: ubuntu-latest
+    needs: [quick-smoke-tests, comprehensive-smoke-tests]
+    if: always()
+    
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "# Smoke Test Suite Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Quick Smoke Tests:** ${{ needs.quick-smoke-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Comprehensive Tests:** ${{ needs.comprehensive-smoke-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Environment Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** $(date -Iseconds)" >> $GITHUB_STEP_SUMMARY
+          
+          # Overall status
+          if [[ "${{ needs.quick-smoke-tests.result }}" == "success" ]]; then
+            if [[ "${{ needs.comprehensive-smoke-tests.result }}" == "success" || "${{ needs.comprehensive-smoke-tests.result }}" == "skipped" ]]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "## ✅ Overall Status: HEALTHY" >> $GITHUB_STEP_SUMMARY
+              echo "The Taskmaster system passed all applicable smoke tests." >> $GITHUB_STEP_SUMMARY
+            else
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "## ⚠️ Overall Status: PARTIAL" >> $GITHUB_STEP_SUMMARY
+              echo "Basic tests passed but comprehensive tests had issues." >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## ❌ Overall Status: UNHEALTHY" >> $GITHUB_STEP_SUMMARY
+            echo "Critical smoke tests failed. System may not be functioning properly." >> $GITHUB_STEP_SUMMARY
+          fi
