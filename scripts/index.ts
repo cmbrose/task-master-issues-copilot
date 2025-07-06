@@ -169,3 +169,18 @@ export {
   type CommandArguments,
   type CommentParseOptions
 } from './comment-parser';
+
+// Export sub-issue creation utilities
+export {
+  generateSubIssueLabels,
+  buildSubIssueTitle,
+  buildSubIssueBody,
+  createSubIssueFromTask,
+  updateIssueWithDependencies,
+  updateBodyWithRequiredBy,
+  addSubIssueRelationship,
+  updateDependencyLabels,
+  type Task as SubIssueTask,
+  type Issue,
+  type ParentIssue
+} from './sub-issue-creation';
