@@ -401,6 +401,93 @@ function testEdgeCases() {
   return passed === testCases.length;
 }
 
+function testEnhancedValidation() {
+  console.log('🧪 Testing enhanced validation features...');
+  
+  const testCases = [
+    // Enhanced error message tests
+    {
+      input: { depth: 0.5 } as any,
+      expectedValid: false,
+      expectedErrorContains: 'whole number',
+      description: 'non-integer depth with descriptive error'
+    },
+    {
+      input: { depth: -1 } as any,
+      expectedValid: false,
+      expectedErrorContains: 'below minimum',
+      description: 'negative depth with range error'
+    },
+    {
+      input: { threshold: 101 } as any,
+      expectedValid: false,
+      expectedErrorContains: 'exceeds maximum',
+      description: 'threshold too high with range error'
+    },
+    {
+      input: { deptg: 3 } as any, // typo in "depth"
+      expectedValid: false,
+      expectedErrorContains: 'Did you mean',
+      description: 'typo in argument name with suggestion'
+    },
+    {
+      input: { maxDepth: 2, depth: 3 } as any,
+      expectedValid: false,
+      expectedErrorContains: 'multiple depth arguments',
+      description: 'conflicting depth arguments'
+    },
+    {
+      input: { complexity: 50, threshold: 60 } as any,
+      expectedValid: false,
+      expectedErrorContains: 'multiple threshold arguments',
+      description: 'conflicting threshold arguments'
+    },
+    {
+      input: { randomArg: 'value' } as any,
+      expectedValid: false,
+      expectedErrorContains: 'Valid arguments are',
+      description: 'unknown argument with available options'
+    },
+    
+    // Valid cases that should still work
+    {
+      input: { maxDepth: 3 } as any,
+      expectedValid: true,
+      description: 'valid maxDepth only'
+    },
+    {
+      input: { 'max-depth': 2, 'complexity-threshold': 75 } as any,
+      expectedValid: true,
+      description: 'valid kebab-case arguments'
+    }
+  ];
+  
+  let passed = 0;
+  for (const testCase of testCases) {
+    const result = validateBreakdownArgs(testCase.input);
+    
+    const isValid = result.isValid === testCase.expectedValid;
+    const hasExpectedError = !testCase.expectedErrorContains || 
+      result.errors.some(error => error.includes(testCase.expectedErrorContains!));
+    
+    if (isValid && hasExpectedError) {
+      console.log(`  ✅ ${testCase.description}`);
+      passed++;
+    } else {
+      console.log(`  ❌ ${testCase.description}`);
+      if (!isValid) {
+        console.log(`    Expected valid=${testCase.expectedValid}, got valid=${result.isValid}`);
+      }
+      if (!hasExpectedError && testCase.expectedErrorContains) {
+        console.log(`    Expected error containing '${testCase.expectedErrorContains}', got: ${result.errors.join(', ')}`);
+      }
+    }
+  }
+  
+  console.log(`Enhanced validation: ${passed}/${testCases.length} tests passed\n`);
+  return passed === testCases.length;
+}
+
 // Run all tests
 function runAllTests() {
   console.log('🎯 Running comment parser tests\n');
@@ -410,7 +497,8 @@ function runAllTests() {
     testParseCommand(),
     testValidateBreakdownArgs(),
     testParseBreakdownCommand(),
-    testEdgeCases()
+    testEdgeCases(),
+    testEnhancedValidation()
   ];
   
   const totalPassed = results.filter(r => r).length;
@@ -424,6 +512,9 @@ function runAllTests() {
     console.log('✅ Detect commands in comments (/breakdown)');
     console.log('✅ Parse command arguments in multiple formats');
     console.log('✅ Validate breakdown command arguments');
+    console.log('✅ Enhanced validation with detailed error messages');
+    console.log('✅ Argument conflict detection and suggestions');
+    console.log('✅ Type validation with helpful descriptions');
     console.log('✅ Handle edge cases and error conditions');
     console.log('✅ Provide structured command parsing interface');
   } else {

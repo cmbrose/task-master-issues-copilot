@@ -31,6 +31,7 @@
         "test:artifact-capabilities": "npx ts-node test/test-artifact-capabilities.ts",
         "test:artifact-recovery": "npx ts-node test/test-artifact-recovery.ts",
         "test:comment-parser": "npx ts-node test/test-comment-parser.ts",
+        "test:enhanced-validation": "npx ts-node test/test-enhanced-validation.ts",
         "test:metadata-extractor": "npx ts-node test/test-metadata-extractor.ts",
         "test:artifact-download-validation": "npx ts-node test/test-artifact-download-validation.ts",
         "test:enhanced-rate-limit-recovery": "npx ts-node test/test-enhanced-rate-limit-recovery.ts",
