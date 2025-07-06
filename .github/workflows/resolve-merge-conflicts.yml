@@ -76,11 +76,11 @@ jobs:
         run: |
           if [ -s /tmp/conflict_files.txt ]; then
             gh pr comment ${{ steps.prinfo.outputs.pr_number }} --body "\
-⚠️ Merge conflicts detected!</br> \
-A commit has been made that merges HEAD and retains merge conflict markers.</br> \
-Please resolve the conflicts in that branch and update the PR.</br> \
-REMEMBER - conflicting changes were made for a reason and are required for different work. \
-DO NOT just delete work which you don't know about. Update your work to coexist with the conflicting change. \
+          ⚠️ Merge conflicts detected!</br> \
+          A commit has been made that merges HEAD and retains merge conflict markers.</br> \
+          Please resolve the conflicts in that branch and update the PR.</br> \
+          REMEMBER - conflicting changes were made for a reason and are required for different work. \
+          DO NOT just delete work which you don't know about. Update your work to coexist with the conflicting change. \
             "
           fi
         env:
