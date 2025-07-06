@@ -21,7 +21,8 @@ import {
   createArtifactManager,
   type ProcessingCheckpoint,
   type BatchMetrics,
-  OperationPriority
+  OperationPriority,
+  ParentIssueStateManager
 } from '../../../scripts/index';
 
 interface BlockedStatusResult {
@@ -199,6 +200,13 @@ async function processWebhookMode(githubApi: EnhancedGitHubApi): Promise<Blocked
     if (metrics.cyclesDetected > 0) {
       core.warning(`Detected ${metrics.cyclesDetected} circular dependencies during processing`);
     }
+    
+    // Initialize parent issue state manager for dynamic updates
+    const stateManager = new ParentIssueStateManager(githubApi);
+    
+    // Update parent issue state if the closed issue was a sub-issue
+    await stateManager.updateFromSubIssueChange(closedIssue.number, 'closed');
+    core.info(`🔄 Updated parent issue state for closed sub-issue #${closedIssue.number}`);
     
     // Process unblockable issues in batches for better performance
     const batchSize = 10;

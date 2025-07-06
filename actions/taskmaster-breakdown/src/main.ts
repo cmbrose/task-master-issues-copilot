@@ -19,9 +19,12 @@ import {
   updateIssueWithDependencies,
   updateBodyWithRequiredBy,
   updateDependencyLabels,
+  ParentIssueStateManager,
+  BreakdownStatus,
   type SubIssueTask as Task,
   type Issue,
-  type ParentIssue
+  type ParentIssue,
+  type BreakdownMetadata
 } from '../../../scripts/index';
 
 interface TaskGraph {
@@ -167,7 +170,7 @@ async function run(): Promise<void> {
     core.info(`📊 Using max depth: ${maxDepth}`);
     core.info(`📈 Using complexity threshold: ${complexityThreshold}`);
 
-    // Step 2: Fetch parent issue data
+    // Step 2: Fetch parent issue data and initialize state manager
     const githubApi = createGitHubApiClient({
       token: config.githubToken!,
       owner: context.repo.owner,
@@ -175,6 +178,9 @@ async function run(): Promise<void> {
       debug: true
     });
 
+    // Initialize parent issue state manager
+    const stateManager = new ParentIssueStateManager(githubApi);
+    
     core.info(`🔍 Fetching parent issue #${issueNumber}...`);
     const parentIssueData = await getIssue(githubApi, issueNumber);
     const parentIssue: ParentIssue = {
@@ -183,6 +189,17 @@ async function run(): Promise<void> {
     };
     
     core.info(`📊 Parent issue: ${parentIssue.title}`);
+
+    // Initialize breakdown state
+    const breakdownMetadata: BreakdownMetadata = {
+      executedAt: new Date(),
+      maxDepth,
+      complexityThreshold,
+      commandArgs
+    };
+    
+    await stateManager.initializeBreakdown(issueNumber, breakdownMetadata);
+    core.info(`🚧 Initialized breakdown state for parent issue #${issueNumber}`);
 
     // Step 3: Generate task breakdown
     // Note: In a full implementation, this would run the actual Taskmaster CLI
@@ -275,10 +292,13 @@ async function run(): Promise<void> {
       }
     }
 
-    // Step 6: Update parent issue state
-    core.info(`📝 Updating parent issue #${parentIssue.number}...`);
+    // Step 6: Complete breakdown and update parent issue state
+    core.info(`📝 Completing breakdown for parent issue #${parentIssue.number}...`);
     
-    // Add breakdown summary section
+    const subIssueNumbers = createdSubIssues.map(issue => issue.number);
+    await stateManager.completeBreakdown(parentIssue.number, subIssueNumbers);
+    
+    // Add breakdown summary section to body (legacy support)
     const breakdownSummary = `
 
 ## Breakdown Summary
@@ -288,31 +308,40 @@ ${createdSubIssues.map(issue => `- [ ] #${issue.number} ${issue.title}`).join('\
 *Breakdown executed on ${new Date().toISOString()} with max-depth=${maxDepth}, complexity-threshold=${complexityThreshold}*
 `;
     
-    // Add breakdown summary to parent issue body
-    let updatedParentBody = parentIssue.body || '';
+    // Add breakdown summary to parent issue body if not already present
+    const currentIssue = await githubApi.getIssue(parentIssue.number);
+    let updatedParentBody = currentIssue.body || '';
     if (!updatedParentBody.includes('## Breakdown Summary')) {
       updatedParentBody += breakdownSummary;
+      
+      try {
+        await githubApi.updateIssue(parentIssue.number, {
+          body: updatedParentBody
+        });
+        core.info(`📝 Added breakdown summary to parent issue #${parentIssue.number}`);
+      } catch (error) {
+        core.warning(`Failed to update parent issue body: ${error}`);
+      }
     }
-    
-    // Add breakdown label to parent issue
-    const parentLabels = (parentIssue.labels as any[])?.map(l => typeof l === 'string' ? l : l.name) || [];
-    if (!parentLabels.includes('breakdown-completed')) {
-      parentLabels.push('breakdown-completed');
-    }
-    
-    try {
-      await githubApi.updateIssue(parentIssue.number, {
-        body: updatedParentBody,
-        labels: parentLabels
-      });
-      core.info(`✅ Updated parent issue #${parentIssue.number} with breakdown summary`);
-    } catch (error) {
-      core.warning(`Failed to update parent issue: ${error}`);
+
+    // Validate state consistency
+    const consistencyCheck = await stateManager.validateStateConsistency(parentIssue.number);
+    if (!consistencyCheck.isConsistent) {
+      core.warning(`State consistency issues detected for parent #${parentIssue.number}:`);
+      for (const issue of consistencyCheck.issues) {
+        core.warning(`  - ${issue}`);
+      }
+    } else {
+      core.info(`✅ Parent issue state is consistent`);
     }
 
     // Set outputs
+    const parentState = stateManager.getState(parentIssue.number);
     core.setOutput('sub-issues-created', String(createdSubIssues.length));
     core.setOutput('parent-issue-updated', 'true');
+    core.setOutput('parent-issue-state', parentState?.breakdownStatus || 'unknown');
+    core.setOutput('parent-issue-progress', parentState ? `${parentState.completedSubIssues}/${parentState.totalSubIssues}` : '0/0');
+    core.setOutput('state-consistency-check', consistencyCheck.isConsistent ? 'passed' : 'failed');
     core.setOutput('command-args', JSON.stringify(parseResult.command.args));
     core.setOutput('max-depth', maxDepth?.toString() || '');
     core.setOutput('complexity-threshold', complexityThreshold?.toString() || '');

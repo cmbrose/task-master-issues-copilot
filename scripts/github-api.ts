@@ -1170,6 +1170,21 @@ export class EnhancedGitHubApi {
   }
 
   /**
+   * Get a single issue by number
+   */
+  async getIssue(issueNumber: number): Promise<ApiIssue> {
+    return this.executeWithRetry(async () => {
+      const response = await this.octokit.issues.get({
+        owner: this.config.owner,
+        repo: this.config.repo,
+        issue_number: issueNumber
+      });
+      
+      return response.data as ApiIssue;
+    }, 'get-issue', OperationPriority.MEDIUM);
+  }
+
+  /**
    * Parse sub-issue numbers from issue body content
    */
   private parseSubIssuesFromBody(body: string): number[] {
