@@ -7,10 +7,8 @@ on:
 
   # Scheduled runs for periodic dependency checking
   schedule:
-    # Every 10 minutes during business hours (9 AM - 6 PM UTC, Mon-Fri)
-    - cron: '*/10 9-18 * * 1-5'
-    # Hourly during off-hours and weekends
-    - cron: '0 * * * *'
+    # Every 10 minutes to ensure median blocked → unblocked latency < 15 minutes
+    - cron: '*/10 * * * *'
 
   # Manual dispatch for testing and one-off runs
   workflow_dispatch:
