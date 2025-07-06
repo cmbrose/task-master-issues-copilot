@@ -36,6 +36,44 @@ export interface TaskGraphArtifact {
     leafTasks: number;
     /** Processing configuration used */
     processingConfig?: any;
+    /** PRD hash for integrity validation */
+    prdHash: string;
+    /** Task counts by category */
+    taskCounts: {
+      total: number;
+      completed: number;
+      pending: number;
+      blocked: number;
+    };
+    /** Dependency chains mapping */
+    dependencyChains: {
+      /** Task ID to its dependencies */
+      dependencies: Record<string, string[]>;
+      /** Task ID to tasks that depend on it */
+      dependents: Record<string, string[]>;
+    };
+    /** Workflow run context */
+    workflowRunContext: {
+      /** GitHub run ID */
+      runId: string;
+      /** GitHub run number */
+      runNumber: number;
+      /** Workflow name */
+      workflowName: string;
+      /** Trigger event */
+      eventName: string;
+      /** Actor who triggered */
+      actor: string;
+      /** Repository context */
+      repository: {
+        owner: string;
+        name: string;
+      };
+      /** Branch/ref information */
+      ref: string;
+      /** Commit SHA */
+      sha: string;
+    };
   };
   /** Processing status */
   status: 'pending' | 'processing' | 'completed' | 'failed';
@@ -86,8 +124,32 @@ export class ArtifactManager {
   /**
    * Upload task graph as artifact before processing
    */
-  async uploadTaskGraph(taskGraph: any, metadata: Partial<TaskGraphArtifact['metadata']> = {}): Promise<string> {
+  async uploadTaskGraph(
+    taskGraph: any, 
+    metadata: Partial<TaskGraphArtifact['metadata']> = {},
+    prdContent?: string
+  ): Promise<string> {
     const artifactId = this.generateArtifactId();
+    
+    // Calculate required metadata fields
+    const taskCounts = this.countTasksByStatus(taskGraph);
+    const dependencyChains = this.extractDependencyChains(taskGraph);
+    const prdHash = prdContent ? this.calculatePrdHash(prdContent) : 'unknown';
+    
+    // Get workflow run context from environment variables
+    const workflowRunContext = {
+      runId: process.env.GITHUB_RUN_ID || 'unknown',
+      runNumber: parseInt(process.env.GITHUB_RUN_NUMBER || '0'),
+      workflowName: process.env.GITHUB_WORKFLOW || 'unknown',
+      eventName: process.env.GITHUB_EVENT_NAME || 'unknown',
+      actor: process.env.GITHUB_ACTOR || 'unknown',
+      repository: {
+        owner: process.env.GITHUB_REPOSITORY_OWNER || 'unknown',
+        name: process.env.GITHUB_REPOSITORY?.split('/')[1] || 'unknown'
+      },
+      ref: process.env.GITHUB_REF || 'unknown',
+      sha: process.env.GITHUB_SHA || 'unknown'
+    };
     
     const artifact: TaskGraphArtifact = {
       id: artifactId,
@@ -97,6 +159,10 @@ export class ArtifactManager {
         totalTasks: this.calculateTotalTasks(taskGraph),
         maxDepth: this.calculateTaskHierarchyDepth(taskGraph.tasks || []),
         leafTasks: this.countLeafTasks(taskGraph.tasks || []),
+        prdHash,
+        taskCounts,
+        dependencyChains,
+        workflowRunContext,
         ...metadata
       },
       status: 'pending'
@@ -119,6 +185,8 @@ export class ArtifactManager {
       console.log(`   - Total tasks: ${artifact.metadata.totalTasks}`);
       console.log(`   - Max depth: ${artifact.metadata.maxDepth}`);
       console.log(`   - Leaf tasks: ${artifact.metadata.leafTasks}`);
+      console.log(`   - PRD hash: ${artifact.metadata.prdHash}`);
+      console.log(`   - Workflow run: ${artifact.metadata.workflowRunContext.runId}`);
       console.log(`   - Size: ${this.formatFileSize(uploadResult.size || 0)}`);
 
       return artifactId;
@@ -396,6 +464,248 @@ export class ArtifactManager {
     } catch (error) {
       console.warn(`Warning: Failed to cleanup temp files: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * Download and validate artifact by ID
+   */
+  async downloadArtifact(artifactId: string): Promise<TaskGraphArtifact | null> {
+    try {
+      console.log(`🔍 Downloading artifact: ${artifactId}`);
+      
+      // Parse artifact ID to number if it's a numeric string
+      let numericArtifactId: number;
+      if (/^\d+$/.test(artifactId)) {
+        numericArtifactId = parseInt(artifactId);
+      } else {
+        console.error(`❌ Invalid artifact ID format: ${artifactId}. Expected numeric ID.`);
+        return null;
+      }
+      
+      const downloadResult = await this.artifactClient.downloadArtifact(
+        numericArtifactId,
+        {
+          path: this.tempDir
+        }
+      );
+
+      const artifactPath = path.join(this.tempDir, `task-graph-${artifactId}.json`);
+      
+      if (!fs.existsSync(artifactPath)) {
+        console.error(`❌ Downloaded artifact file not found: ${artifactPath}`);
+        return null;
+      }
+
+      const artifactContent = fs.readFileSync(artifactPath, 'utf8');
+      const artifact: TaskGraphArtifact = JSON.parse(artifactContent);
+
+      // Validate artifact structure
+      if (!this.validateArtifactStructure(artifact)) {
+        console.error(`❌ Invalid artifact structure for ID: ${artifactId}`);
+        return null;
+      }
+
+      console.log(`✅ Artifact downloaded and validated: ${artifactId}`);
+      console.log(`   - Total tasks: ${artifact.metadata.totalTasks}`);
+      console.log(`   - PRD hash: ${artifact.metadata.prdHash}`);
+      console.log(`   - Workflow run: ${artifact.metadata.workflowRunContext.runId}`);
+
+      return artifact;
+    } catch (error) {
+      console.error(`❌ Failed to download artifact ${artifactId}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * Search artifacts by metadata criteria
+   */
+  async searchArtifacts(criteria: {
+    prdHash?: string;
+    workflowRunId?: string;
+    sourcePath?: string;
+    minTotalTasks?: number;
+    maxTotalTasks?: string;
+    status?: TaskGraphArtifact['status'];
+    dateRange?: {
+      start: Date;
+      end: Date;
+    };
+  }): Promise<string[]> {
+    try {
+      console.log(`🔍 Searching artifacts with criteria:`, criteria);
+      
+      // Note: GitHub Actions Artifact API doesn't support direct search by metadata
+      // This is a placeholder for the search logic that would need to be implemented
+      // by listing all artifacts and filtering by metadata
+      
+      console.log(`⚠️ Artifact search by metadata not fully implemented - would require listing all artifacts`);
+      console.log(`   This would be implemented by iterating through all artifacts and checking metadata`);
+      
+      return [];
+    } catch (error) {
+      console.error(`❌ Failed to search artifacts: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
+  }
+
+  /**
+   * Validate artifact structure and integrity
+   */
+  private validateArtifactStructure(artifact: any): artifact is TaskGraphArtifact {
+    try {
+      // Check required top-level properties
+      if (!artifact.id || !artifact.taskGraph || !artifact.metadata || !artifact.status) {
+        console.error('Missing required top-level properties');
+        return false;
+      }
+
+      // Check required metadata properties
+      const required = ['createdAt', 'totalTasks', 'maxDepth', 'leafTasks', 'prdHash', 'taskCounts', 'dependencyChains', 'workflowRunContext'];
+      for (const prop of required) {
+        if (!(prop in artifact.metadata)) {
+          console.error(`Missing required metadata property: ${prop}`);
+          return false;
+        }
+      }
+
+      // Validate taskCounts structure
+      const taskCounts = artifact.metadata.taskCounts;
+      if (typeof taskCounts.total !== 'number' || 
+          typeof taskCounts.completed !== 'number' ||
+          typeof taskCounts.pending !== 'number' ||
+          typeof taskCounts.blocked !== 'number') {
+        console.error('Invalid taskCounts structure');
+        return false;
+      }
+
+      // Validate dependencyChains structure
+      const deps = artifact.metadata.dependencyChains;
+      if (!deps.dependencies || !deps.dependents || 
+          typeof deps.dependencies !== 'object' ||
+          typeof deps.dependents !== 'object') {
+        console.error('Invalid dependencyChains structure');
+        return false;
+      }
+
+      // Validate workflowRunContext structure
+      const context = artifact.metadata.workflowRunContext;
+      const requiredContext = ['runId', 'runNumber', 'workflowName', 'eventName', 'actor', 'repository', 'ref', 'sha'];
+      for (const prop of requiredContext) {
+        if (!(prop in context)) {
+          console.error(`Missing required workflowRunContext property: ${prop}`);
+          return false;
+        }
+      }
+
+      if (!context.repository.owner || !context.repository.name) {
+        console.error('Invalid repository structure in workflowRunContext');
+        return false;
+      }
+
+      console.log(`✅ Artifact structure validation passed`);
+      return true;
+    } catch (error) {
+      console.error(`❌ Artifact validation error: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
+  /**
+   * Calculate PRD hash for integrity validation
+   */
+  calculatePrdHash(prdContent: string): string {
+    // Create a more sensitive hash by including content length and a simple checksum
+    const contentLength = prdContent.length;
+    const checksum = prdContent.split('').reduce((acc, char, index) => {
+      return acc + char.charCodeAt(0) * (index + 1);
+    }, 0);
+    
+    const combined = `${contentLength}-${checksum}-${Buffer.from(prdContent).toString('base64').slice(0, 8)}`;
+    return Buffer.from(combined).toString('base64').slice(0, 16);
+  }
+
+  /**
+   * Extract dependency chains from task graph
+   */
+  extractDependencyChains(taskGraph: any): TaskGraphArtifact['metadata']['dependencyChains'] {
+    const dependencies: Record<string, string[]> = {};
+    const dependents: Record<string, string[]> = {};
+
+    const processTasks = (tasks: any[], parentId?: string) => {
+      if (!Array.isArray(tasks)) return;
+
+      for (const task of tasks) {
+        const taskId = task.id || task.title || 'unknown';
+        
+        // Initialize arrays
+        dependencies[taskId] = dependencies[taskId] || [];
+        dependents[taskId] = dependents[taskId] || [];
+
+        // Add parent as dependency if exists
+        if (parentId) {
+          dependencies[taskId].push(parentId);
+          dependents[parentId] = dependents[parentId] || [];
+          dependents[parentId].push(taskId);
+        }
+
+        // Process explicit dependencies if they exist
+        if (task.dependencies && Array.isArray(task.dependencies)) {
+          for (const dep of task.dependencies) {
+            dependencies[taskId].push(dep);
+            dependents[dep] = dependents[dep] || [];
+            dependents[dep].push(taskId);
+          }
+        }
+
+        // Process subtasks recursively
+        if (task.subtasks && Array.isArray(task.subtasks)) {
+          processTasks(task.subtasks, taskId);
+        }
+      }
+    };
+
+    processTasks(taskGraph.tasks || []);
+
+    return { dependencies, dependents };
+  }
+
+  /**
+   * Count tasks by status
+   */
+  countTasksByStatus(taskGraph: any): TaskGraphArtifact['metadata']['taskCounts'] {
+    const counts = {
+      total: 0,
+      completed: 0,
+      pending: 0,
+      blocked: 0
+    };
+
+    const processTasks = (tasks: any[]) => {
+      if (!Array.isArray(tasks)) return;
+
+      for (const task of tasks) {
+        counts.total++;
+        
+        // Determine status based on task properties
+        if (task.status === 'completed' || task.closed) {
+          counts.completed++;
+        } else if (task.status === 'blocked' || task.blocked) {
+          counts.blocked++;
+        } else {
+          counts.pending++;
+        }
+
+        // Process subtasks recursively
+        if (task.subtasks && Array.isArray(task.subtasks)) {
+          processTasks(task.subtasks);
+        }
+      }
+    };
+
+    processTasks(taskGraph.tasks || []);
+
+    return counts;
   }
 }
 

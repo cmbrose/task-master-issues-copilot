@@ -1,0 +1,176 @@
+name: Task Graph Replay
+
+on:
+  # Manual dispatch with artifact ID/URL input
+  workflow_dispatch:
+    inputs:
+      artifact-id:
+        description: 'Artifact ID or URL to recover from'
+        required: true
+        type: string
+      dry-run:
+        description: 'Dry run mode - analyze only, do not create issues'
+        required: false
+        default: false
+        type: boolean
+      force-recreate:
+        description: 'Force recreation even if issues already exist'
+        required: false
+        default: false
+        type: boolean
+      max-issues:
+        description: 'Maximum number of issues to create (1-100)'
+        required: false
+        default: '50'
+        type: string
+      complexity-threshold:
+        description: 'Complexity threshold for task validation (1-100)'
+        required: false
+        default: '40'
+        type: string
+
+permissions:
+  issues: write
+  contents: read
+  actions: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    name: Artifact Recovery and Issue Recreation
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Validate Inputs
+        run: |
+          echo "🔍 Validating workflow inputs..."
+          
+          # Validate artifact ID
+          if [[ -z "${{ inputs.artifact-id }}" ]]; then
+            echo "❌ Artifact ID is required"
+            exit 1
+          fi
+          
+          # Validate max issues
+          MAX_ISSUES="${{ inputs.max-issues }}"
+          if ! [[ "$MAX_ISSUES" =~ ^[0-9]+$ ]] || [[ "$MAX_ISSUES" -lt 1 ]] || [[ "$MAX_ISSUES" -gt 100 ]]; then
+            echo "❌ Max issues must be a number between 1 and 100"
+            exit 1
+          fi
+          
+          # Validate complexity threshold
+          COMPLEXITY="${{ inputs.complexity-threshold }}"
+          if ! [[ "$COMPLEXITY" =~ ^[0-9]+$ ]] || [[ "$COMPLEXITY" -lt 1 ]] || [[ "$COMPLEXITY" -gt 100 ]]; then
+            echo "❌ Complexity threshold must be a number between 1 and 100"
+            exit 1
+          fi
+          
+          echo "✅ Input validation passed"
+          echo "📋 Configuration:"
+          echo "   - Artifact ID: ${{ inputs.artifact-id }}"
+          echo "   - Dry run: ${{ inputs.dry-run }}"
+          echo "   - Force recreate: ${{ inputs.force-recreate }}"
+          echo "   - Max issues: ${{ inputs.max-issues }}"
+          echo "   - Complexity threshold: ${{ inputs.complexity-threshold }}"
+
+      - name: Log Recovery Start
+        run: |
+          echo "🚀 Starting Task Graph Replay"
+          echo "⏰ Started at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "👤 Triggered by: ${{ github.actor }}"
+          echo "🔧 Repository: ${{ github.repository }}"
+          echo "📦 Artifact: ${{ inputs.artifact-id }}"
+          
+          if [[ "${{ inputs.dry-run }}" == "true" ]]; then
+            echo "🎯 DRY-RUN MODE: No issues will be created"
+          fi
+
+      - name: Run Artifact Recovery
+        id: recovery
+        run: |
+          echo "📦 Downloading and processing artifact..."
+          
+          # Set environment variables for the recovery script
+          export ARTIFACT_ID="${{ inputs.artifact-id }}"
+          export GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          export GITHUB_REPOSITORY="${{ github.repository }}"
+          export DRY_RUN="${{ inputs.dry-run }}"
+          export FORCE_RECREATE="${{ inputs.force-recreate }}"
+          export MAX_ISSUES="${{ inputs.max-issues }}"
+          export COMPLEXITY_THRESHOLD="${{ inputs.complexity-threshold }}"
+          
+          # Run the recovery script
+          npx ts-node scripts/artifact-recovery.ts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate Recovery Report
+        if: always()
+        run: |
+          echo "## 📊 Task Graph Replay Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact ID**: ${{ inputs.artifact-id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: Manual (${{ github.actor }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dry Run**: ${{ inputs.dry-run }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Force Recreate**: ${{ inputs.force-recreate }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Max Issues**: ${{ inputs.max-issues }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Add results if available
+          if [[ -n "${{ steps.recovery.outputs.success }}" ]]; then
+            echo "### Results" >> $GITHUB_STEP_SUMMARY
+            echo "- **Success**: ${{ steps.recovery.outputs.success }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Issues Created**: ${{ steps.recovery.outputs.issues-created }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Issues Updated**: ${{ steps.recovery.outputs.issues-updated }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Issues Skipped**: ${{ steps.recovery.outputs.issues-skipped }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Errors**: ${{ steps.recovery.outputs.errors }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Processing Time**: ${{ steps.recovery.outputs.processing-time-ms }}ms" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⏰ Completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+
+      - name: Handle Recovery Failure
+        if: failure()
+        run: |
+          echo "❌ Task Graph Replay failed"
+          echo "🔍 Check the logs above for detailed error information"
+          echo "💡 Common issues:"
+          echo "   - Invalid or missing artifact ID"
+          echo "   - Artifact download failure"
+          echo "   - GitHub API rate limiting"
+          echo "   - Malformed task graph data"
+          echo "   - Permission issues"
+          
+          # Add failure information to summary
+          echo "## ❌ Task Graph Replay Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The artifact recovery process encountered an error. Please check the workflow logs for details." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Troubleshooting" >> $GITHUB_STEP_SUMMARY
+          echo "1. Verify the artifact ID is correct and accessible" >> $GITHUB_STEP_SUMMARY
+          echo "2. Check that the artifact contains valid task graph data" >> $GITHUB_STEP_SUMMARY
+          echo "3. Ensure the workflow has sufficient permissions" >> $GITHUB_STEP_SUMMARY
+          echo "4. Review GitHub API rate limits" >> $GITHUB_STEP_SUMMARY
+
+      - name: Success Summary
+        if: success()
+        run: |
+          echo "✅ Task Graph Replay completed successfully"
+          echo "📊 Check the summary above for detailed results"
+          
+          if [[ "${{ inputs.dry-run }}" == "true" ]]; then
+            echo "🎯 DRY-RUN MODE: No actual issues were created"
+            echo "   Re-run with dry-run disabled to create issues"
+          fi
