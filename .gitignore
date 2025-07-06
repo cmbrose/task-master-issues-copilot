@@ -37,7 +37,9 @@ __pycache__
 
 # Testing
 coverage/
+# Ignore all src files except our test framework
 src/
+!src/tests/
 
 # CI/CD Artifacts
 audit-results.json
