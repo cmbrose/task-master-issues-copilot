@@ -14,22 +14,32 @@ import {
   createGitHubApiClient,
   parseIssueBody,
   ApiIssue,
-  type ParsedDependency
+  type ParsedDependency,
+  DependencyGraphAnalyzer,
+  type ParsedIssueData
 } from '../../../scripts/index';
 
 interface BlockedStatusResult {
   issuesUpdated: number;
   dependenciesResolved: number;
   errors: string[];
+  performanceMetrics?: {
+    processingTimeMs: number;
+    issuesScanned: number;
+    dependencyGraphSize: number;
+    cyclesDetected: number;
+  };
 }
 
 /**
- * Find issues that can be unblocked by a closed issue
+ * Enhanced function to find issues that can be unblocked by closed issues
+ * Uses advanced dependency graph analysis for better performance
  */
-async function findUnblockableIssues(
+async function findUnblockableIssuesBatch(
   githubApi: EnhancedGitHubApi,
-  closedIssueNumber: number
-): Promise<ApiIssue[]> {
+  closedIssueNumbers: number[]
+): Promise<{ unblockableIssues: ApiIssue[]; metrics: any }> {
+  const startTime = Date.now();
   const unblockableIssues: ApiIssue[] = [];
   
   try {
@@ -39,35 +49,59 @@ async function findUnblockableIssues(
       labels: 'taskmaster'
     });
 
+    // Parse all issues to create dependency graph
+    const parsedIssues: ParsedIssueData[] = [];
     for (const issue of openIssues) {
       if (!issue.body) continue;
       
       try {
         const parsed = parseIssueBody(issue.body);
-        const dependencies = parsed.dependencies;
-        
-        // Check if this issue depends on the closed issue
-        const dependsOnClosed = dependencies.some(dep => dep.issueNumber === closedIssueNumber);
-        if (!dependsOnClosed) continue;
-        
-        // Check if closing this dependency would unblock the issue
-        const remainingBlockers = dependencies.filter(dep => 
-          dep.issueNumber !== closedIssueNumber && !dep.completed
-        );
-        
-        if (remainingBlockers.length === 0) {
-          unblockableIssues.push(issue);
+        // Add issue number if not in YAML front-matter
+        if (!parsed.yamlFrontMatter.id) {
+          parsed.yamlFrontMatter.id = issue.number;
         }
+        parsedIssues.push(parsed);
       } catch (parseError) {
         core.warning(`Failed to parse issue #${issue.number}: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
       }
     }
+    
+    // Build dependency graph
+    const graph = DependencyGraphAnalyzer.buildDependencyGraph(parsedIssues);
+    
+    // Detect cycles
+    const cycles = DependencyGraphAnalyzer.detectCircularDependencies(graph);
+    if (cycles.length > 0) {
+      core.warning(`Detected ${cycles.length} circular dependencies: ${cycles.map(c => c.description).join(', ')}`);
+    }
+    
+    // Find unblockable issues using enhanced algorithm
+    const unblockableIds = DependencyGraphAnalyzer.findUnblockableIssues(graph, closedIssueNumbers);
+    
+    // Map back to API issues
+    for (const issueId of unblockableIds) {
+      const issue = openIssues.find(i => i.number === issueId);
+      if (issue) {
+        unblockableIssues.push(issue);
+      }
+    }
+    
+    const processingTime = Date.now() - startTime;
+    
+    return {
+      unblockableIssues,
+      metrics: {
+        processingTimeMs: processingTime,
+        issuesScanned: openIssues.length,
+        dependencyGraphSize: graph.size,
+        cyclesDetected: cycles.length,
+        unblockableFound: unblockableIssues.length
+      }
+    };
   } catch (error) {
     core.error(`Failed to fetch open issues: ${error instanceof Error ? error.message : String(error)}`);
     throw error;
   }
-  
-  return unblockableIssues;
 }
 
 /**
@@ -130,8 +164,10 @@ async function updateIssueStatus(
 
 /**
  * Process blocked status management for webhook mode (single issue)
+ * Enhanced with batch processing and performance monitoring
  */
 async function processWebhookMode(githubApi: EnhancedGitHubApi): Promise<BlockedStatusResult> {
+  const startTime = Date.now();
   const result: BlockedStatusResult = {
     issuesUpdated: 0,
     dependenciesResolved: 0,
@@ -149,29 +185,48 @@ async function processWebhookMode(githubApi: EnhancedGitHubApi): Promise<Blocked
   core.info(`Processing closed issue: #${closedIssue.number} - "${closedIssue.title}"`);
   
   try {
-    const unblockableIssues = await findUnblockableIssues(githubApi, closedIssue.number);
+    const { unblockableIssues, metrics } = await findUnblockableIssuesBatch(githubApi, [closedIssue.number]);
     
-    for (const issue of unblockableIssues) {
-      try {
-        if (!issue.body) continue;
-        
-        const parsed = parseIssueBody(issue.body);
-        const newDependencyLabels = updateDependencyLabels(parsed.dependencies);
-        
-        await updateIssueStatus(githubApi, issue, newDependencyLabels);
-        result.issuesUpdated++;
-        
-        if (newDependencyLabels.includes('ready')) {
-          result.dependenciesResolved++;
-        }
-      } catch (error) {
-        const errorMsg = `Failed to update issue #${issue.number}: ${error instanceof Error ? error.message : String(error)}`;
-        result.errors.push(errorMsg);
-        core.error(errorMsg);
-      }
+    core.info(`Found ${unblockableIssues.length} issues that could be unblocked (scanned ${metrics.issuesScanned} issues in ${metrics.processingTimeMs}ms)`);
+    
+    if (metrics.cyclesDetected > 0) {
+      core.warning(`Detected ${metrics.cyclesDetected} circular dependencies during processing`);
     }
     
-    core.info(`Found ${unblockableIssues.length} issues that could be unblocked`);
+    // Process unblockable issues in batches for better performance
+    const batchSize = 10;
+    for (let i = 0; i < unblockableIssues.length; i += batchSize) {
+      const batch = unblockableIssues.slice(i, i + batchSize);
+      
+      await Promise.allSettled(batch.map(async (issue) => {
+        try {
+          if (!issue.body) return;
+          
+          const parsed = parseIssueBody(issue.body);
+          const newDependencyLabels = updateDependencyLabels(parsed.dependencies);
+          
+          await updateIssueStatus(githubApi, issue, newDependencyLabels);
+          result.issuesUpdated++;
+          
+          if (newDependencyLabels.includes('ready')) {
+            result.dependenciesResolved++;
+          }
+        } catch (error) {
+          const errorMsg = `Failed to update issue #${issue.number}: ${error instanceof Error ? error.message : String(error)}`;
+          result.errors.push(errorMsg);
+          core.error(errorMsg);
+        }
+      }));
+    }
+    
+    // Add performance metrics
+    result.performanceMetrics = {
+      processingTimeMs: Date.now() - startTime,
+      issuesScanned: metrics.issuesScanned,
+      dependencyGraphSize: metrics.dependencyGraphSize,
+      cyclesDetected: metrics.cyclesDetected
+    };
+    
   } catch (error) {
     const errorMsg = `Failed to process webhook mode: ${error instanceof Error ? error.message : String(error)}`;
     result.errors.push(errorMsg);
@@ -183,8 +238,10 @@ async function processWebhookMode(githubApi: EnhancedGitHubApi): Promise<Blocked
 
 /**
  * Process blocked status management for full scan mode (all issues)
+ * Enhanced with dependency graph analysis and batch processing
  */
 async function processFullScanMode(githubApi: EnhancedGitHubApi): Promise<BlockedStatusResult> {
+  const startTime = Date.now();
   const result: BlockedStatusResult = {
     issuesUpdated: 0,
     dependenciesResolved: 0,
@@ -200,40 +257,88 @@ async function processFullScanMode(githubApi: EnhancedGitHubApi): Promise<Blocke
     
     core.info(`Scanning ${openIssues.length} open issues for dependency status updates`);
     
+    // Parse all issues and build dependency graph
+    const parsedIssues: ParsedIssueData[] = [];
     for (const issue of openIssues) {
+      if (!issue.body) continue;
+      
       try {
-        if (!issue.body) continue;
-        
         const parsed = parseIssueBody(issue.body);
-        const dependencies = parsed.dependencies;
-        
-        if (dependencies.length === 0) continue;
-        
-        const newDependencyLabels = updateDependencyLabels(dependencies);
-        const currentLabels = issue.labels?.map(label => 
-          typeof label === 'string' ? label : label.name
-        ).filter((label): label is string => Boolean(label)) || [];
-        
-        // Check if labels need updating
-        const hasBlocked = currentLabels.some(label => label.startsWith('blocked'));
-        const hasReady = currentLabels.includes('ready');
-        const shouldBeBlocked = newDependencyLabels.some(label => label.startsWith('blocked'));
-        const shouldBeReady = newDependencyLabels.includes('ready');
-        
-        if ((hasBlocked !== shouldBeBlocked) || (hasReady !== shouldBeReady)) {
-          await updateIssueStatus(githubApi, issue, newDependencyLabels);
-          result.issuesUpdated++;
-          
-          if (shouldBeReady && !hasReady) {
-            result.dependenciesResolved++;
-          }
+        // Add issue number if not in YAML front-matter
+        if (!parsed.yamlFrontMatter.id) {
+          parsed.yamlFrontMatter.id = issue.number;
         }
-      } catch (error) {
-        const errorMsg = `Failed to process issue #${issue.number}: ${error instanceof Error ? error.message : String(error)}`;
-        result.errors.push(errorMsg);
-        core.error(errorMsg);
+        parsedIssues.push(parsed);
+      } catch (parseError) {
+        core.warning(`Failed to parse issue #${issue.number}: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
       }
     }
+    
+    // Build dependency graph and analyze
+    const graph = DependencyGraphAnalyzer.buildDependencyGraph(parsedIssues);
+    const cycles = DependencyGraphAnalyzer.detectCircularDependencies(graph);
+    const resolutionOrder = DependencyGraphAnalyzer.getDependencyResolutionOrder(graph);
+    
+    if (cycles.length > 0) {
+      core.warning(`Detected ${cycles.length} circular dependencies: ${cycles.map(c => c.description).join(', ')}`);
+    }
+    
+    core.info(`Dependency graph analysis: ${graph.size} nodes, ${resolutionOrder.resolvedNodes}/${resolutionOrder.totalNodes} resolvable`);
+    
+    // Process issues in dependency resolution order for optimal efficiency
+    const issuesToProcess = resolutionOrder.order
+      .map(id => openIssues.find(issue => issue.number === id))
+      .filter((issue): issue is ApiIssue => Boolean(issue));
+    
+    // Process in batches
+    const batchSize = 15;
+    for (let i = 0; i < issuesToProcess.length; i += batchSize) {
+      const batch = issuesToProcess.slice(i, i + batchSize);
+      
+      await Promise.allSettled(batch.map(async (issue) => {
+        try {
+          if (!issue.body) return;
+          
+          const parsed = parseIssueBody(issue.body);
+          const dependencies = parsed.dependencies;
+          
+          if (dependencies.length === 0) return;
+          
+          const newDependencyLabels = updateDependencyLabels(dependencies);
+          const currentLabels = issue.labels?.map(label => 
+            typeof label === 'string' ? label : label.name
+          ).filter((label): label is string => Boolean(label)) || [];
+          
+          // Check if labels need updating
+          const hasBlocked = currentLabels.some(label => label.startsWith('blocked'));
+          const hasReady = currentLabels.includes('ready');
+          const shouldBeBlocked = newDependencyLabels.some(label => label.startsWith('blocked'));
+          const shouldBeReady = newDependencyLabels.includes('ready');
+          
+          if ((hasBlocked !== shouldBeBlocked) || (hasReady !== shouldBeReady)) {
+            await updateIssueStatus(githubApi, issue, newDependencyLabels);
+            result.issuesUpdated++;
+            
+            if (shouldBeReady && !hasReady) {
+              result.dependenciesResolved++;
+            }
+          }
+        } catch (error) {
+          const errorMsg = `Failed to process issue #${issue.number}: ${error instanceof Error ? error.message : String(error)}`;
+          result.errors.push(errorMsg);
+          core.error(errorMsg);
+        }
+      }));
+    }
+    
+    // Add performance metrics
+    result.performanceMetrics = {
+      processingTimeMs: Date.now() - startTime,
+      issuesScanned: openIssues.length,
+      dependencyGraphSize: graph.size,
+      cyclesDetected: cycles.length
+    };
+    
   } catch (error) {
     const errorMsg = `Failed to process full scan mode: ${error instanceof Error ? error.message : String(error)}`;
     result.errors.push(errorMsg);

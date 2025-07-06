@@ -245,6 +245,304 @@ export function hasYamlFrontMatter(body: string): boolean {
 }
 
 /**
+ * Enhanced dependency graph utilities for advanced dependency resolution
+ */
+export class DependencyGraphAnalyzer {
+  /**
+   * Build a dependency graph from parsed issue data
+   */
+  static buildDependencyGraph(issues: ParsedIssueData[]): Map<number, DependencyNode> {
+    const graph = new Map<number, DependencyNode>();
+    
+    // Initialize nodes
+    for (const issue of issues) {
+      const issueId = issue.yamlFrontMatter.id;
+      if (issueId) {
+        graph.set(issueId, {
+          id: issueId,
+          dependencies: [],
+          dependents: [],
+          status: issue.metadata.status || 'pending',
+          priority: issue.metadata.priority || 'medium'
+        });
+      }
+    }
+    
+    // Build relationships
+    for (const issue of issues) {
+      const issueId = issue.yamlFrontMatter.id;
+      if (!issueId) continue;
+      
+      const node = graph.get(issueId);
+      if (!node) continue;
+      
+      // Add dependencies from YAML front-matter
+      for (const depId of issue.yamlFrontMatter.dependencies || []) {
+        node.dependencies.push(depId);
+        const depNode = graph.get(depId);
+        if (depNode) {
+          depNode.dependents.push(issueId);
+        }
+      }
+      
+      // Add dependencies from parsed dependencies section
+      for (const dep of issue.dependencies) {
+        if (!node.dependencies.includes(dep.issueNumber)) {
+          node.dependencies.push(dep.issueNumber);
+          const depNode = graph.get(dep.issueNumber);
+          if (depNode) {
+            depNode.dependents.push(issueId);
+          }
+        }
+      }
+    }
+    
+    return graph;
+  }
+  
+  /**
+   * Detect circular dependencies in the graph
+   */
+  static detectCircularDependencies(graph: Map<number, DependencyNode>): CircularDependency[] {
+    const visited = new Set<number>();
+    const recursionStack = new Set<number>();
+    const cycles: CircularDependency[] = [];
+    
+    function dfs(nodeId: number, path: number[]): boolean {
+      if (recursionStack.has(nodeId)) {
+        // Found a cycle
+        const cycleStart = path.indexOf(nodeId);
+        const cycle = path.slice(cycleStart);
+        cycle.push(nodeId); // Complete the cycle
+        
+        cycles.push({
+          cycle,
+          description: `Circular dependency detected: ${cycle.map(id => `#${id}`).join(' → ')}`
+        });
+        return true;
+      }
+      
+      if (visited.has(nodeId)) {
+        return false;
+      }
+      
+      visited.add(nodeId);
+      recursionStack.add(nodeId);
+      path.push(nodeId);
+      
+      const node = graph.get(nodeId);
+      if (node) {
+        for (const depId of node.dependencies) {
+          if (dfs(depId, [...path])) {
+            return true;
+          }
+        }
+      }
+      
+      recursionStack.delete(nodeId);
+      path.pop();
+      return false;
+    }
+    
+    for (const nodeId of graph.keys()) {
+      if (!visited.has(nodeId)) {
+        dfs(nodeId, []);
+      }
+    }
+    
+    return cycles;
+  }
+  
+  /**
+   * Get dependency resolution order using topological sort with priority
+   */
+  static getDependencyResolutionOrder(graph: Map<number, DependencyNode>): ResolutionOrder {
+    const inDegree = new Map<number, number>();
+    const queue: number[] = [];
+    const result: number[] = [];
+    
+    // Calculate in-degrees
+    for (const [nodeId, node] of graph) {
+      inDegree.set(nodeId, node.dependencies.length);
+    }
+    
+    // Find nodes with no dependencies and sort by priority
+    const noDependencyNodes = Array.from(inDegree.entries())
+      .filter(([_, degree]) => degree === 0)
+      .map(([nodeId]) => nodeId)
+      .sort((a, b) => {
+        const nodeA = graph.get(a);
+        const nodeB = graph.get(b);
+        const priorityA = getPriorityValue(nodeA?.priority);
+        const priorityB = getPriorityValue(nodeB?.priority);
+        return priorityB - priorityA; // Higher priority first
+      });
+    
+    queue.push(...noDependencyNodes);
+    
+    // Process nodes in topological order
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      result.push(current);
+      
+      const node = graph.get(current);
+      if (node) {
+        // Process dependents sorted by priority
+        const sortedDependents = node.dependents
+          .map(depId => ({ id: depId, priority: getPriorityValue(graph.get(depId)?.priority) }))
+          .sort((a, b) => b.priority - a.priority)
+          .map(item => item.id);
+          
+        for (const dependent of sortedDependents) {
+          const currentInDegree = inDegree.get(dependent) || 0;
+          const newInDegree = currentInDegree - 1;
+          inDegree.set(dependent, newInDegree);
+          
+          if (newInDegree === 0) {
+            queue.push(dependent);
+          }
+        }
+      }
+    }
+    
+    const cycles = this.detectCircularDependencies(graph);
+    
+    return {
+      order: result,
+      hasCycles: cycles.length > 0,
+      cycles,
+      totalNodes: graph.size,
+      resolvedNodes: result.length
+    };
+  }
+  
+  /**
+   * Find issues that would be unblocked by resolving specific dependencies
+   */
+  static findUnblockableIssues(graph: Map<number, DependencyNode>, resolvedIssueIds: number[]): number[] {
+    const unblockable: number[] = [];
+    
+    for (const [nodeId, node] of graph) {
+      // Skip if already resolved
+      if (resolvedIssueIds.includes(nodeId)) continue;
+      
+      // Check if any dependencies would be resolved
+      const hasResolvedDependency = node.dependencies.some(depId => resolvedIssueIds.includes(depId));
+      if (!hasResolvedDependency) continue;
+      
+      // Check if all other dependencies are already resolved
+      const remainingDependencies = node.dependencies.filter(depId => !resolvedIssueIds.includes(depId));
+      
+      if (remainingDependencies.length === 0) {
+        unblockable.push(nodeId);
+      }
+    }
+    
+    return unblockable;
+  }
+  
+  /**
+   * Calculate critical path through the dependency graph
+   */
+  static calculateCriticalPath(graph: Map<number, DependencyNode>): CriticalPath {
+    const distances = new Map<number, number>();
+    const predecessors = new Map<number, number | null>();
+    
+    // Initialize distances
+    for (const nodeId of graph.keys()) {
+      distances.set(nodeId, 0);
+      predecessors.set(nodeId, null);
+    }
+    
+    // Topological sort for longest path calculation
+    const order = this.getDependencyResolutionOrder(graph).order;
+    
+    for (const nodeId of order) {
+      const node = graph.get(nodeId);
+      if (!node) continue;
+      
+      const currentDistance = distances.get(nodeId) || 0;
+      
+      for (const dependent of node.dependents) {
+        const newDistance = currentDistance + 1;
+        const currentDepDistance = distances.get(dependent) || 0;
+        
+        if (newDistance > currentDepDistance) {
+          distances.set(dependent, newDistance);
+          predecessors.set(dependent, nodeId);
+        }
+      }
+    }
+    
+    // Find the node with maximum distance (end of critical path)
+    let maxDistance = 0;
+    let endNode: number | null = null;
+    
+    for (const [nodeId, distance] of distances) {
+      if (distance > maxDistance) {
+        maxDistance = distance;
+        endNode = nodeId;
+      }
+    }
+    
+    // Reconstruct critical path
+    const path: number[] = [];
+    let current = endNode;
+    
+    while (current !== null) {
+      path.unshift(current);
+      current = predecessors.get(current) || null;
+    }
+    
+    return {
+      path,
+      length: maxDistance,
+      estimatedDuration: maxDistance // Can be enhanced with task duration estimates
+    };
+  }
+}
+
+// Helper function to convert priority to numeric value
+function getPriorityValue(priority?: string): number {
+  switch (priority?.toLowerCase()) {
+    case 'critical': return 5;
+    case 'high': return 4;
+    case 'medium': return 3;
+    case 'low': return 2;
+    case 'trivial': return 1;
+    default: return 3; // default to medium
+  }
+}
+
+// Enhanced interfaces for dependency graph analysis
+export interface DependencyNode {
+  id: number;
+  dependencies: number[];
+  dependents: number[];
+  status: string;
+  priority: string;
+}
+
+export interface CircularDependency {
+  cycle: number[];
+  description: string;
+}
+
+export interface ResolutionOrder {
+  order: number[];
+  hasCycles: boolean;
+  cycles: CircularDependency[];
+  totalNodes: number;
+  resolvedNodes: number;
+}
+
+export interface CriticalPath {
+  path: number[];
+  length: number;
+  estimatedDuration: number;
+}
+
+/**
  * Utility function to extract task ID from YAML front-matter or title
  */
 export function extractTaskId(body: string, title?: string): number | undefined {
