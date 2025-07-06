@@ -49,6 +49,8 @@ def apply_git_patch(path: str, patch: str) -> bool:
             print('No diff block found in pseudo-patch.')
             return False
         diff_lines = diff_block.group(0).splitlines()
+        # Collect all + lines from the patch (these are the resolved lines)
+        resolved_lines = [l[1:] + '\n' for l in diff_lines if l.startswith('+')]
         # Read the file
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -56,24 +58,19 @@ def apply_git_patch(path: str, patch: str) -> bool:
         except Exception as e:
             print(f"Error reading file {path}: {e}")
             return False
-        # Find the first line in diff_lines that matches a context line in file_lines
-        # and replace the block between -<<<<<<< and ->>>>>>> with the + lines
+        # Replace all conflict blocks with resolved_lines
         new_file_lines = []
         i = 0
         while i < len(file_lines):
             line = file_lines[i]
-            if any(l.startswith('-<<<<<<<') for l in diff_lines):
-                # Find the start of the conflict in file_lines
-                if line.lstrip().startswith('<<<<<<<'):
-                    # Skip to >>>>>>>
-                    while i < len(file_lines) and not file_lines[i].lstrip().startswith('>>>>>>>'):
-                        i += 1
-                    i += 1  # skip >>>>>>>
-                    # Insert the + lines from the patch
-                    for l in diff_lines:
-                        if l.startswith('+'):
-                            new_file_lines.append(l[1:] + '\n')
-                    continue
+            if line.lstrip().startswith('<<<<<<<'):
+                # Skip lines until after the conflict block
+                while i < len(file_lines) and not file_lines[i].lstrip().startswith('>>>>>>>'):
+                    i += 1
+                i += 1  # skip >>>>>>>>
+                # Insert the resolved lines from the patch
+                new_file_lines.extend(resolved_lines)
+                continue
             new_file_lines.append(line)
             i += 1
         # Write the new file
