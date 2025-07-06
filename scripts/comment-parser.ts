@@ -138,7 +138,18 @@ function parseCommandArguments(
     if (token.startsWith('--') && token.includes('=')) {
       const [flag, ...valueParts] = token.substring(2).split('=');
       const value = valueParts.join('=');
-      args[normalizeKey(flag)] = parseValue(value, errors);
+      
+      // Special handling for empty quoted values in the original command line
+      // Check if the original had quotes around an empty value
+      const flagPattern = new RegExp(`--${flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}=["']?["']`, 'i');
+      const hasEmptyQuotedValue = flagPattern.test(commandLine);
+      
+      if (hasEmptyQuotedValue && value === '') {
+        errors.push('Quoted strings cannot be empty');
+        args[normalizeKey(flag)] = '';
+      } else {
+        args[normalizeKey(flag)] = parseValue(value, errors);
+      }
       i++;
       continue;
     }
@@ -232,24 +243,24 @@ function normalizeKey(key: string): string {
  * Parse argument value to appropriate type with enhanced validation
  */
 function parseValue(value: string, errors: string[]): string | number | boolean {
-  // Handle empty or whitespace-only values
-  if (!value || value.trim() === '') {
-    errors.push('Empty argument values are not allowed');
-    return value;
-  }
-
-  const trimmedValue = value.trim();
-  
-  // Remove quotes if present
-  if ((trimmedValue.startsWith('"') && trimmedValue.endsWith('"')) || 
-      (trimmedValue.startsWith("'") && trimmedValue.endsWith("'"))) {
-    const unquotedValue = trimmedValue.slice(1, -1);
+  // Check for quotes first, before any trimming or empty checks
+  if ((value.startsWith('"') && value.endsWith('"')) || 
+      (value.startsWith("'") && value.endsWith("'"))) {
+    const unquotedValue = value.slice(1, -1);
     // Validate that quoted strings are not empty
     if (unquotedValue.trim() === '') {
       errors.push('Quoted strings cannot be empty');
       return '';
     }
     return unquotedValue;
+  }
+  
+  const trimmedValue = value.trim();
+  
+  // Handle empty or whitespace-only values (after quote check)
+  if (!value || trimmedValue === '') {
+    errors.push('Empty argument values are not allowed');
+    return value;
   }
   
   // Try to parse as integer
@@ -443,28 +454,21 @@ export function validateBreakdownArgs(args: CommandArguments): {
           return false;
         }
         
+        // Handle underscore to camelCase conversion more intelligently
+        const underscoreConverted = originalKey.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+        if (underscoreConverted.toLowerCase() === lowerKnown) {
+          return true;
+        }
+        
         // Check for substring match (partial match)
         if (lowerKnown.includes(lowerNormalized) || lowerNormalized.includes(lowerKnown)) {
           return true;
         }
         
-        // Check for single character differences (typos)
+        // Better single character difference detection (for typos like 'treshold' -> 'threshold')
         if (Math.abs(lowerNormalized.length - lowerKnown.length) <= 1) {
-          const minLen = Math.min(lowerNormalized.length, lowerKnown.length);
-          let differences = 0;
-          
-          // Compare character by character
-          for (let i = 0; i < minLen; i++) {
-            if (lowerNormalized[i] !== lowerKnown[i]) {
-              differences++;
-              if (differences > 1) break;
-            }
-          }
-          
-          // Add length difference
-          differences += Math.abs(lowerNormalized.length - lowerKnown.length);
-          
-          if (differences <= 1) {
+          const levenshteinDistance = calculateLevenshteinDistance(lowerNormalized, lowerKnown);
+          if (levenshteinDistance <= 1) {
             return true;
           }
         }
@@ -472,19 +476,8 @@ export function validateBreakdownArgs(args: CommandArguments): {
         // Check for similar length with 2 character differences (common typos)
         if (Math.abs(lowerNormalized.length - lowerKnown.length) <= 2 && 
             Math.min(lowerNormalized.length, lowerKnown.length) >= 4) {
-          const minLen = Math.min(lowerNormalized.length, lowerKnown.length);
-          let matches = 0;
-          
-          // Count matching characters in same positions
-          for (let i = 0; i < minLen; i++) {
-            if (lowerNormalized[i] === lowerKnown[i]) {
-              matches++;
-            }
-          }
-          
-          // If most characters match, it's likely a typo
-          const matchRatio = matches / minLen;
-          if (matchRatio >= 0.7) {
+          const levenshteinDistance = calculateLevenshteinDistance(lowerNormalized, lowerKnown);
+          if (levenshteinDistance <= 2) {
             return true;
           }
         }
@@ -494,7 +487,11 @@ export function validateBreakdownArgs(args: CommandArguments): {
       
       let errorMsg = `Unknown argument: '${originalKey}'`;
       if (suggestions.length > 0) {
-        errorMsg += `. Did you mean: ${suggestions.join(', ')}?`;
+        if (suggestions.length === 1) {
+          errorMsg += `. Did you mean: ${suggestions[0]}?`;
+        } else {
+          errorMsg += `. Did you mean: ${suggestions.join(', ')}?`;
+        }
       } else {
         errorMsg += `. Valid arguments are: ${knownKeys.join(', ')}`;
       }
@@ -547,4 +544,35 @@ export function parseBreakdownCommand(commentBody: string): {
     },
     validation
   };
+}
+
+/**
+ * Calculate Levenshtein distance between two strings for better typo detection
+ */
+function calculateLevenshteinDistance(a: string, b: string): number {
+  const dp: number[][] = Array(a.length + 1).fill(null).map(() => Array(b.length + 1).fill(0));
+
+  for (let i = 0; i <= a.length; i++) {
+    dp[i][0] = i;
+  }
+
+  for (let j = 0; j <= b.length; j++) {
+    dp[0][j] = j;
+  }
+
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1];
+      } else {
+        dp[i][j] = Math.min(
+          dp[i - 1][j] + 1,     // deletion
+          dp[i][j - 1] + 1,     // insertion
+          dp[i - 1][j - 1] + 1  // substitution
+        );
+      }
+    }
+  }
+
+  return dp[a.length][b.length];
 }
