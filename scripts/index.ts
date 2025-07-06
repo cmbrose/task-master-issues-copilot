@@ -130,7 +130,11 @@ export {
   ArtifactManager,
   createArtifactManager,
   type TaskGraphArtifact,
-  type ReplayData
+  type ReplayData,
+  type ArtifactChecksumOptions,
+  type ArtifactSignatureOptions,
+  type ArtifactDownloadOptions,
+  type ArtifactDownloadResult
 } from './artifact-manager';
 
 // Export issue parsing utilities
