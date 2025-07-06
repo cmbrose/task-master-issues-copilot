@@ -615,9 +615,14 @@ export class ArtifactManager {
    * Calculate PRD hash for integrity validation
    */
   calculatePrdHash(prdContent: string): string {
-    // Simple hash calculation - in production, consider using crypto.createHash
-    const simpleHash = Buffer.from(prdContent).toString('base64').slice(0, 16);
-    return simpleHash;
+    // Create a more sensitive hash by including content length and a simple checksum
+    const contentLength = prdContent.length;
+    const checksum = prdContent.split('').reduce((acc, char, index) => {
+      return acc + char.charCodeAt(0) * (index + 1);
+    }, 0);
+    
+    const combined = `${contentLength}-${checksum}-${Buffer.from(prdContent).toString('base64').slice(0, 8)}`;
+    return Buffer.from(combined).toString('base64').slice(0, 16);
   }
 
   /**
