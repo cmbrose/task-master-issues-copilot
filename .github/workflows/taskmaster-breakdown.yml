@@ -1,0 +1,133 @@
+name: Taskmaster Breakdown
+
+on:
+  # Trigger on issue comments for breakdown commands
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  # Filter breakdown comments
+  check-breakdown-command:
+    runs-on: ubuntu-latest
+    outputs:
+      should-run: ${{ steps.check.outputs.should-run }}
+    steps:
+      - name: Check if comment starts with /breakdown
+        id: check
+        run: |
+          COMMENT_BODY="${{ github.event.comment.body }}"
+          if [[ "$COMMENT_BODY" =~ ^/breakdown ]]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "✅ Breakdown command detected in comment"
+          else
+            echo "should-run=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ Comment does not start with /breakdown, skipping"
+          fi
+
+  # Main breakdown execution
+  breakdown:
+    needs: [check-breakdown-command]
+    if: needs.check-breakdown-command.outputs.should-run == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Log Trigger Information
+        run: |
+          echo "🚀 Taskmaster Breakdown triggered by: ${{ github.event_name }}"
+          echo "💬 Comment on issue #${{ github.event.issue.number }}"
+          echo "👤 Comment by: ${{ github.event.comment.user.login }}"
+          echo "📄 Comment body: ${{ github.event.comment.body }}"
+
+      - name: Parse Breakdown Command Arguments
+        id: parse-args
+        run: |
+          COMMENT_BODY="${{ github.event.comment.body }}"
+          
+          # Default values
+          BREAKDOWN_DEPTH="2"
+          COMPLEXITY_THRESHOLD="40"
+          
+          # Parse depth argument
+          if [[ "$COMMENT_BODY" =~ --depth[[:space:]]+([0-9]+) ]]; then
+            BREAKDOWN_DEPTH="${BASH_REMATCH[1]}"
+          elif [[ "$COMMENT_BODY" =~ max-depth=([0-9]+) ]]; then
+            BREAKDOWN_DEPTH="${BASH_REMATCH[1]}"
+          fi
+          
+          # Parse threshold argument  
+          if [[ "$COMMENT_BODY" =~ --threshold[[:space:]]+([0-9]+) ]]; then
+            COMPLEXITY_THRESHOLD="${BASH_REMATCH[1]}"
+          elif [[ "$COMMENT_BODY" =~ complexity=([0-9]+) ]]; then
+            COMPLEXITY_THRESHOLD="${BASH_REMATCH[1]}"
+          fi
+          
+          # Validate ranges
+          if [ "$BREAKDOWN_DEPTH" -lt 1 ] || [ "$BREAKDOWN_DEPTH" -gt 5 ]; then
+            echo "❌ Invalid breakdown depth: $BREAKDOWN_DEPTH. Must be between 1 and 5."
+            exit 1
+          fi
+          
+          if [ "$COMPLEXITY_THRESHOLD" -lt 1 ] || [ "$COMPLEXITY_THRESHOLD" -gt 100 ]; then
+            echo "❌ Invalid complexity threshold: $COMPLEXITY_THRESHOLD. Must be between 1 and 100."
+            exit 1
+          fi
+          
+          echo "breakdown-depth=$BREAKDOWN_DEPTH" >> $GITHUB_OUTPUT
+          echo "complexity-threshold=$COMPLEXITY_THRESHOLD" >> $GITHUB_OUTPUT
+          
+          echo "✅ Parsed arguments:"
+          echo "  • Breakdown depth: $BREAKDOWN_DEPTH"
+          echo "  • Complexity threshold: $COMPLEXITY_THRESHOLD"
+
+      - name: Run Taskmaster Breakdown
+        id: breakdown
+        uses: ./actions/taskmaster-breakdown
+        with:
+          skip-checkout: 'true'
+          breakdown-max-depth: ${{ steps.parse-args.outputs.breakdown-depth }}
+          complexity-threshold: ${{ steps.parse-args.outputs.complexity-threshold }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## 📊 Taskmaster Breakdown Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Issue**: #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Comment by**: ${{ github.event.comment.user.login }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Breakdown depth**: ${{ steps.parse-args.outputs.breakdown-depth }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Complexity threshold**: ${{ steps.parse-args.outputs.complexity-threshold }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Sub-issues created**: ${{ steps.breakdown.outputs.sub-issues-created || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Parent issue updated**: ${{ steps.breakdown.outputs.parent-issue-updated || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+
+  # React to breakdown comments
+  react-to-comment:
+    needs: [breakdown, check-breakdown-command]
+    if: always() && needs.check-breakdown-command.outputs.should-run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: React to comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const success = '${{ needs.breakdown.result }}' === 'success';
+            const reaction = success ? '+1' : '-1';
+            
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: reaction
+            });
+            
+            if (success) {
+              console.log('✅ Added thumbs-up reaction for successful breakdown');
+            } else {
+              console.log('❌ Added thumbs-down reaction for failed breakdown');
+            }

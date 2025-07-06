@@ -1,0 +1,116 @@
+name: Taskmaster Watcher
+
+on:
+  # Trigger on issue state changes for dependency tracking
+  issues:
+    types: [closed, reopened]
+
+  # Scheduled runs for periodic dependency checking
+  schedule:
+    # Every 10 minutes to ensure median blocked → unblocked latency < 15 minutes
+    - cron: '*/10 * * * *'
+
+  # Manual dispatch for testing and one-off runs
+  workflow_dispatch:
+    inputs:
+      scan-mode:
+        description: 'Scan mode for dependency resolution'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - 'webhook'
+          - 'full'
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  # Determine scan mode based on trigger
+  determine-scan-mode:
+    runs-on: ubuntu-latest
+    outputs:
+      scan-mode: ${{ steps.mode.outputs.scan-mode }}
+    steps:
+      - name: Determine Scan Mode
+        id: mode
+        run: |
+          case "${{ github.event_name }}" in
+            "workflow_dispatch")
+              echo "scan-mode=${{ inputs.scan-mode }}" >> $GITHUB_OUTPUT
+              ;;
+            "issues")
+              echo "scan-mode=webhook" >> $GITHUB_OUTPUT
+              ;;
+            "schedule")
+              echo "scan-mode=full" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "scan-mode=webhook" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+  # Main watcher execution
+  watcher:
+    needs: [determine-scan-mode]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Log Trigger Information
+        run: |
+          echo "🚀 Taskmaster Watcher triggered by: ${{ github.event_name }}"
+          echo "🔍 Scan mode: ${{ needs.determine-scan-mode.outputs.scan-mode }}"
+          
+          case "${{ github.event_name }}" in
+            "workflow_dispatch")
+              echo "👤 Triggered manually by: ${{ github.actor }}"
+              echo "⚙️ Parameters:"
+              echo "  • Scan mode: ${{ inputs.scan-mode }}"
+              ;;
+            "issues")
+              echo "📋 Issue #${{ github.event.issue.number }} ${{ github.event.action }}"
+              echo "👤 Action by: ${{ github.actor }}"
+              echo "📝 Issue title: ${{ github.event.issue.title }}"
+              ;;
+            "schedule")
+              echo "⏰ Scheduled run - checking all dependencies"
+              ;;
+          esac
+
+      - name: Run Taskmaster Watcher
+        id: watcher
+        uses: ./actions/taskmaster-watcher
+        with:
+          skip-checkout: 'true'
+          scan-mode: ${{ needs.determine-scan-mode.outputs.scan-mode }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_ISSUE_ACTION: ${{ github.event.action }}
+
+      - name: Summary
+        run: |
+          echo "## 📊 Taskmaster Watcher Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scan Mode**: ${{ needs.determine-scan-mode.outputs.scan-mode }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ github.event_name }}" == "issues" ]]; then
+            echo "- **Issue**: #${{ github.event.issue.number }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Action**: ${{ github.event.action }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "- **Issues Updated**: ${{ steps.watcher.outputs.issues-updated || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dependencies Resolved**: ${{ steps.watcher.outputs.dependencies-resolved || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.determine-scan-mode.outputs.scan-mode }}" == "webhook" ]]; then
+            echo "🎯 **Webhook Mode**: Processed specific issue change event for real-time dependency updates." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🔍 **Full Scan Mode**: Performed comprehensive scan of all open issues for batch dependency resolution." >> $GITHUB_STEP_SUMMARY
+          fi
