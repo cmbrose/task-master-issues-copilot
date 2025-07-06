@@ -38,3 +38,25 @@ __pycache__
 # Testing
 coverage/
 src/
+
+# CI/CD Artifacts
+audit-results.json
+trivy-results.sarif
+release-package/
+*.zip
+build-artifacts/
+security-audit-results/
+performance-results/
+performance-benchmarks/
+release-notes.md
+test-results/
+*.xml
+
+# Docker temporary files
+Dockerfile.test
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
