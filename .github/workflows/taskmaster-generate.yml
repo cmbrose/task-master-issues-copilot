@@ -55,6 +55,11 @@ on:
         required: false
         default: '30'
         type: string
+      dry-run:
+        description: 'Enable dry-run mode (generate task graph without creating issues)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   issues: write
@@ -78,6 +83,9 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             echo "🎯 Running in DRY-RUN mode - no issues will be created"
             echo "DRY_RUN=true" >> $GITHUB_ENV
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry-run }}" == "true" ]]; then
+            echo "🎯 Manual DRY-RUN mode enabled - no issues will be created"
+            echo "DRY_RUN=true" >> $GITHUB_ENV
           else
             echo "DRY_RUN=false" >> $GITHUB_ENV
           fi
@@ -92,6 +100,7 @@ jobs:
             echo "  • Force download: ${{ inputs.force-download }}"
             echo "  • Max artifacts count: ${{ inputs.max-artifacts-count }}"
             echo "  • Retention days: ${{ inputs.retention-days }}"
+            echo "  • Dry-run mode: ${{ inputs.dry-run }}"
           elif [[ "${{ github.event_name }}" == "push" ]]; then
             echo "📝 PRD files changed in commit: ${{ github.sha }}"
             echo "👤 Committed by: ${{ github.event.head_commit.author.name }}"

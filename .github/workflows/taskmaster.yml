@@ -52,6 +52,11 @@ on:
         required: false
         default: false
         type: boolean
+      dry-run:
+        description: 'Enable dry-run mode (generate task graph without creating issues)'
+        required: false
+        default: false
+        type: boolean
 
   # Automatic trigger on PRD file changes
   push:
@@ -157,7 +162,7 @@ jobs:
             "workflow_dispatch")
               echo "action-mode=${{ inputs.action-mode }}" >> $GITHUB_OUTPUT
               echo "scan-mode=${{ inputs.scan-mode }}" >> $GITHUB_OUTPUT
-              echo "dry-run=false" >> $GITHUB_OUTPUT
+              echo "dry-run=${{ inputs.dry-run }}" >> $GITHUB_OUTPUT
               ;;
             "push")
               echo "action-mode=generate" >> $GITHUB_OUTPUT
@@ -243,6 +248,7 @@ jobs:
               echo "  • Breakdown max depth: ${{ inputs.breakdown-max-depth }}"
               echo "  • Taskmaster version: ${{ inputs.taskmaster-version }}"
               echo "  • Force download: ${{ inputs.force-download }}"
+              echo "  • Dry-run mode: ${{ inputs.dry-run }}"
               ;;
             "push")
               echo "📝 PRD files changed in commit: ${{ github.sha }}"
