@@ -6,6 +6,7 @@
  */
 
 import { EnhancedGitHubApi, ApiIssue } from './github-api';
+import { formatError } from './platform-utils';
 
 // Task interfaces (shared types)
 export interface Task {
@@ -257,7 +258,7 @@ export async function addSubIssueRelationship(
     parentIssue.subIssues.push(subIssue);
     console.log(`Added sub-issue #${subIssue.number} to parent #${parentIssue.number}.`);
   } catch (error) {
-    console.warn(`Failed to add sub-issue relationship: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(`Failed to add sub-issue relationship: ${formatError(error)}`);
     // Continue without sub-issue relationship
   }
 }
