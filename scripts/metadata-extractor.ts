@@ -178,6 +178,15 @@ export enum LabelCategory {
 }
 
 /**
+ * Interface for label categorization rules
+ */
+interface LabelCategoryRule {
+  prefixes?: string[];
+  exactMatches?: string[];
+  contains?: string[];
+}
+
+/**
  * Milestone information
  */
 export interface MilestoneInfo {
@@ -766,37 +775,69 @@ export class GitHubMetadataExtractor {
   }
 
   /**
+   * Label categorization rules for data-driven classification
+   */
+  private static readonly LABEL_CATEGORY_RULES: Record<LabelCategory, LabelCategoryRule> = {
+    [LabelCategory.STATUS]: {
+      prefixes: ['status:'],
+      exactMatches: ['pending', 'in-progress', 'completed', 'blocked']
+    },
+    [LabelCategory.PRIORITY]: {
+      prefixes: ['priority:'],
+      exactMatches: ['critical', 'high', 'medium', 'low']
+    },
+    [LabelCategory.COMPLEXITY]: {
+      prefixes: ['complexity:'],
+      contains: ['complexity']
+    },
+    [LabelCategory.TYPE]: {
+      prefixes: ['type:'],
+      exactMatches: ['bug', 'feature', 'enhancement', 'documentation']
+    },
+    [LabelCategory.DEPENDENCY]: {
+      contains: ['dependency', 'blocked', 'waiting']
+    },
+    [LabelCategory.HIERARCHY]: {
+      contains: ['parent', 'child', 'subtask']
+    },
+    [LabelCategory.TASKMASTER]: {
+      prefixes: ['taskmaster'],
+      exactMatches: ['taskmaster'],
+      contains: ['taskmaster']
+    },
+    [LabelCategory.CUSTOM]: {}
+  };
+
+  /**
+   * Priority level mappings for data-driven extraction
+   */
+  private static readonly PRIORITY_MAPPINGS: Record<string, number> = {
+    'critical': 5,
+    'high': 4,
+    'medium': 3,
+    'low': 2,
+    'trivial': 1
+  };
+
+  /**
+   * Taskmaster label prefixes for identification
+   */
+  private static readonly TASKMASTER_PREFIXES = ['taskmaster', 'status:', 'priority:', 'complexity:', 'parent:', 'child:'];
+
+  /**
    * Categorize label based on naming conventions
    */
   private categorizeLabel(labelName: string): LabelCategory {
     const name = labelName.toLowerCase();
     
-    if (name.startsWith('status:') || ['pending', 'in-progress', 'completed', 'blocked'].includes(name)) {
-      return LabelCategory.STATUS;
-    }
-    
-    if (name.startsWith('priority:') || ['critical', 'high', 'medium', 'low'].includes(name)) {
-      return LabelCategory.PRIORITY;
-    }
-    
-    if (name.startsWith('complexity:') || name.includes('complexity')) {
-      return LabelCategory.COMPLEXITY;
-    }
-    
-    if (name.startsWith('type:') || ['bug', 'feature', 'enhancement', 'documentation'].includes(name)) {
-      return LabelCategory.TYPE;
-    }
-    
-    if (name.includes('dependency') || name.includes('blocked') || name.includes('waiting')) {
-      return LabelCategory.DEPENDENCY;
-    }
-    
-    if (name.includes('parent') || name.includes('child') || name.includes('subtask')) {
-      return LabelCategory.HIERARCHY;
-    }
-    
-    if (name.includes('taskmaster') || name === 'taskmaster') {
-      return LabelCategory.TASKMASTER;
+    for (const [category, rules] of Object.entries(GitHubMetadataExtractor.LABEL_CATEGORY_RULES)) {
+      const { prefixes = [], exactMatches = [], contains = [] } = rules;
+      
+      if (prefixes.some((prefix: string) => name.startsWith(prefix)) ||
+          exactMatches.includes(name) ||
+          contains.some((keyword: string) => name.includes(keyword))) {
+        return category as LabelCategory;
+      }
     }
     
     return LabelCategory.CUSTOM;
@@ -807,9 +848,7 @@ export class GitHubMetadataExtractor {
    */
   private isTaskmasterLabel(labelName: string): boolean {
     const name = labelName.toLowerCase();
-    const taskmasterPrefixes = ['taskmaster', 'status:', 'priority:', 'complexity:', 'parent:', 'child:'];
-    
-    return taskmasterPrefixes.some(prefix => name.startsWith(prefix)) || name === 'taskmaster';
+    return GitHubMetadataExtractor.TASKMASTER_PREFIXES.some(prefix => name.startsWith(prefix)) || name === 'taskmaster';
   }
 
   /**
@@ -818,11 +857,10 @@ export class GitHubMetadataExtractor {
   private extractPriorityFromLabel(labelName: string): number {
     const name = labelName.toLowerCase();
     
-    if (name.includes('critical')) return 5;
-    if (name.includes('high')) return 4;
-    if (name.includes('medium')) return 3;
-    if (name.includes('low')) return 2;
-    if (name.includes('trivial')) return 1;
+    // Check priority keyword mappings
+    for (const [keyword, value] of Object.entries(GitHubMetadataExtractor.PRIORITY_MAPPINGS)) {
+      if (name.includes(keyword)) return value;
+    }
     
     // Try to extract number from label like "priority:3"
     const match = name.match(/priority:(\d+)/);
