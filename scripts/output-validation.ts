@@ -11,6 +11,8 @@
  * - Task graph schema validation and data extraction
  */
 
+import { formatError } from './platform-utils';
+
 /**
  * Supported output formats
  */
@@ -185,7 +187,7 @@ export function parseJsonOutput(output: string): { data?: any; errors: string[] 
     const data = JSON.parse(trimmed);
     return { data, errors: [] };
   } catch (error) {
-    errors.push(`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    errors.push(`Invalid JSON: ${formatError(error)}`);
     return { errors };
   }
 }
@@ -319,7 +321,7 @@ export function parseTaskGraphJson(output: string): {
     };
 
   } catch (error) {
-    const errorMessage = `Unexpected error during task graph parsing: ${error instanceof Error ? error.message : String(error)}`;
+    const errorMessage = `Unexpected error during task graph parsing: ${formatError(error)}`;
     parseErrors.push(errorMessage);
     allErrors.push(errorMessage);
     return { 
@@ -359,18 +361,18 @@ export function extractTasksForGitHub(taskGraph: TaskGraph): {
               const githubSubtask = convertTaskToGitHubData(subtask, task.id);
               tasks.push(githubSubtask);
             } catch (error) {
-              errors.push(`Failed to convert subtask ${subtask.id} of task ${task.id}: ${error instanceof Error ? error.message : String(error)}`);
+              errors.push(`Failed to convert subtask ${subtask.id} of task ${task.id}: ${formatError(error)}`);
             }
           });
         }
       } catch (error) {
-        errors.push(`Failed to convert task ${index}: ${error instanceof Error ? error.message : String(error)}`);
+        errors.push(`Failed to convert task ${index}: ${formatError(error)}`);
       }
     });
 
     return { tasks, errors };
   } catch (error) {
-    errors.push(`Failed to extract tasks: ${error instanceof Error ? error.message : String(error)}`);
+    errors.push(`Failed to extract tasks: ${formatError(error)}`);
     return { tasks, errors };
   }
 }
@@ -531,7 +533,7 @@ export function parseXmlOutput(output: string): { data?: any; errors: string[] }
       errors: [] 
     };
   } catch (error) {
-    errors.push(`Invalid XML: ${error instanceof Error ? error.message : String(error)}`);
+    errors.push(`Invalid XML: ${formatError(error)}`);
     return { errors };
   }
 }
@@ -762,7 +764,7 @@ export function convertFormat(
     return result;
     
   } catch (error) {
-    result.errors.push(`Conversion failed: ${error instanceof Error ? error.message : String(error)}`);
+    result.errors.push(`Conversion failed: ${formatError(error)}`);
     return result;
   }
 }

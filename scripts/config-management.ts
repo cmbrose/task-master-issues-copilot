@@ -12,6 +12,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { formatError } from './platform-utils';
 
 /**
  * Core configuration parameters used across all Taskmaster actions
@@ -386,7 +387,7 @@ export function loadFromFile(filePath: string): Partial<TaskmasterConfig> {
 
     return configFile.taskmaster || {};
   } catch (error) {
-    throw new Error(`Failed to load config from ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Failed to load config from ${filePath}: ${formatError(error)}`);
   }
 }
 
@@ -476,7 +477,7 @@ export function loadConfig(options: ConfigLoadOptions = {}, overrides: Partial<T
       config = { ...config, ...fileConfig };
     } catch (error) {
       // Log warning but continue
-      console.warn(`Warning: Failed to load config from ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`Warning: Failed to load config from ${filePath}: ${formatError(error)}`);
     }
   }
   

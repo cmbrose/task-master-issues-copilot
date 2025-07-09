@@ -71,6 +71,7 @@ var path = require("path");
 var dotenv = require("dotenv");
 var github_api_1 = require("./scripts/github-api");
 var idempotency_manager_1 = require("./scripts/idempotency-manager");
+var platform_utils_1 = require("./scripts/platform-utils");
 // Types for Node.js globals (process, etc.)
 // If you see type errors, run: npm install --save-dev @types/node
 dotenv.config();
@@ -300,26 +301,30 @@ function addSubIssue(parentIssue, subIssue) {
                     return [3 /*break*/, 4];
                 case 3:
                     error_1 = _a.sent();
-                    console.warn("Failed to add sub-issue relationship: ".concat(error_1 instanceof Error ? error_1.message : String(error_1)));
+                    console.warn("Failed to add sub-issue relationship: ".concat((0, platform_utils_1.formatError)(error_1)));
                     return [3 /*break*/, 4];
                 case 4: return [2 /*return*/];
             }
         });
     });
 }
-// Helper to update issue with dependency links
-function updateIssueWithDependencies(body, dependencyIssues) {
-    if (!(dependencyIssues === null || dependencyIssues === void 0 ? void 0 : dependencyIssues.length))
+// Helper to update issue body with links to related issues
+function updateBodyWithLinks(body, issues, sectionHeader, regex) {
+    if (!(issues === null || issues === void 0 ? void 0 : issues.length))
         return body;
-    var depSection = "## Dependencies\n".concat(dependencyIssues.map(function (i) { return "- [".concat(i.state === 'closed' ? 'x' : ' ', "] #").concat(i.number); }).join('\n'), "\n\n");
-    return body.replace(/## Dependencies[\s\S]+?\n\n/, depSection);
+    var linkItems = issues.map(function (i) { return "- [".concat(i.state === 'closed' ? 'x' : ' ', "] #").concat(i.number); }).join('\n');
+    var section = sectionHeader.includes('##')
+        ? "".concat(sectionHeader, "\n").concat(linkItems, "\n\n")
+        : "".concat(sectionHeader, "\n").concat(linkItems.split('\n').map(function (line) { return line ? "   ".concat(line) : line; }).join('\n'), "\n");
+    return body.replace(regex, section);
 }
 // Helper to update issue with dependency links
+function updateIssueWithDependencies(body, dependencyIssues) {
+    return updateBodyWithLinks(body, dependencyIssues, '## Dependencies', /## Dependencies[\s\S]+?\n\n/);
+}
+// Helper to update issue with required-by links
 function updateBodyWithRequiredBy(body, requiredByIssues) {
-    if (!(requiredByIssues === null || requiredByIssues === void 0 ? void 0 : requiredByIssues.length))
-        return body;
-    var requiredBySection = "- Required By:\n".concat(requiredByIssues.map(function (i) { return "   - [".concat(i.state === 'closed' ? 'x' : ' ', "] #").concat(i.number); }).join('\n'), "\n");
-    return body.replace(/- Required By:[\s\S]+?\n\n/, requiredBySection);
+    return updateBodyWithLinks(body, requiredByIssues, '- Required By:', /- Required By:[\s\S]+?\n\n/);
 }
 function getSubIssues(issue) {
     return __awaiter(this, void 0, void 0, function () {
@@ -332,19 +337,59 @@ function getSubIssues(issue) {
                 case 1: return [2 /*return*/, _a.sent()];
                 case 2:
                     error_2 = _a.sent();
-                    console.warn("Failed to fetch sub-issues for #".concat(issue.number, ": ").concat(error_2 instanceof Error ? error_2.message : String(error_2)));
+                    console.warn("Failed to fetch sub-issues for #".concat(issue.number, ": ").concat((0, platform_utils_1.formatError)(error_2)));
                     return [2 /*return*/, []];
                 case 3: return [2 /*return*/];
             }
         });
     });
 }
+// Helper to update issue with dependencies, required-by links, and labels
+function updateIssueWithDependenciesAndLabels(issue, task, parentTask, idToIssue, idempotencyManager) {
+    return __awaiter(this, void 0, void 0, function () {
+        var depIds, depIssues, reqByIds, reqByIssues, taskId, complexity, baseLabels, dependencyLabels, updatedLabels, needsUpdate;
+        var _a, _b;
+        return __generator(this, function (_c) {
+            switch (_c.label) {
+                case 0:
+                    depIds = ((_a = task.dependencies) === null || _a === void 0 ? void 0 : _a.map(function (depId) {
+                        return parentTask ? "".concat(parentTask.id, ".").concat(depId) : String(depId);
+                    })) || [];
+                    depIssues = depIds.map(function (depId) { return idToIssue[depId]; }).filter(Boolean);
+                    issue.expectedBody = updateIssueWithDependencies(issue.expectedBody, depIssues);
+                    reqByIds = ((_b = task.requiredBy) === null || _b === void 0 ? void 0 : _b.map(function (reqBy) {
+                        return parentTask ? "".concat(parentTask.id, ".").concat(reqBy.id) : String(reqBy.id);
+                    })) || [];
+                    reqByIssues = reqByIds.map(function (reqById) { return idToIssue[reqById]; }).filter(Boolean);
+                    issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
+                    taskId = parentTask ? "".concat(parentTask.id, ".").concat(task.id) : String(task.id);
+                    complexity = complexityMap[taskId];
+                    baseLabels = generateIssueLabels(task, parentTask, complexity);
+                    dependencyLabels = updateDependencyLabels(task, depIssues);
+                    updatedLabels = __spreadArray(__spreadArray([], baseLabels, true), dependencyLabels, true);
+                    needsUpdate = issue.expectedBody !== issue.body;
+                    if (!needsUpdate) return [3 /*break*/, 2];
+                    return [4 /*yield*/, githubApi.updateIssue(issue.number, {
+                            body: issue.expectedBody,
+                            labels: updatedLabels,
+                        })];
+                case 1:
+                    _c.sent();
+                    console.log("Updated issue #".concat(issue.number, " with dependencies/required-bys and labels."));
+                    // Record the update in idempotency state
+                    idempotencyManager.recordIssueUpdate(issue.number, issue.expectedBody, updatedLabels);
+                    _c.label = 2;
+                case 2: return [2 /*return*/];
+            }
+        });
+    });
+}
 function main() {
     return __awaiter(this, void 0, void 0, function () {
-        var idempotencyManager, raw, data, tasks, taskGraphContent, prdState, summary, transactionId, contentHash, idToIssue_1, createdIssues, _loop_1, _i, tasks_1, task, _loop_2, _a, tasks_2, task, summary, error_3;
-        var _b, _c, _d, _e, _f, _g, _h, _j;
-        return __generator(this, function (_k) {
-            switch (_k.label) {
+        var idempotencyManager, raw, data, tasks, taskGraphContent, prdState, summary, transactionId, contentHash, idToIssue, createdIssues, _loop_1, _i, tasks_1, task, _a, tasks_2, task, issue, _b, _c, sub, issue_1, summary, error_3;
+        var _d, _e, _f, _g;
+        return __generator(this, function (_h) {
+            switch (_h.label) {
                 case 0:
                     idempotencyManager = new idempotency_manager_1.IdempotencyManager();
                     raw = fs.readFileSync(TASKS_PATH, 'utf-8');
@@ -354,175 +399,126 @@ function main() {
                     prdState = idempotencyManager.checkPrdState(taskGraphContent, TASKS_PATH);
                     console.log("\uD83D\uDCCA Idempotency Check: isProcessed=".concat(prdState.isProcessed, ", hasChanged=").concat(prdState.hasChanged));
                     // Skip processing if already completed and no changes
-                    if (prdState.isProcessed && !prdState.hasChanged && ((_b = prdState.state) === null || _b === void 0 ? void 0 : _b.status) === 'completed') {
+                    if (prdState.isProcessed && !prdState.hasChanged && ((_d = prdState.state) === null || _d === void 0 ? void 0 : _d.status) === 'completed') {
                         console.log('✅ Task graph already processed successfully, skipping...');
                         summary = idempotencyManager.getStateSummary();
                         console.log("\uD83D\uDCCA Current state: ".concat(summary.totalPrds, " PRDs, ").concat(summary.totalIssues, " issues tracked"));
                         return [2 /*return*/];
                     }
                     transactionId = idempotencyManager.beginTransaction();
-                    _k.label = 1;
+                    _h.label = 1;
                 case 1:
-                    _k.trys.push([1, 11, 12, 13]);
+                    _h.trys.push([1, 14, 15, 16]);
                     // Record processing start
                     contentHash = idempotencyManager.recordPrdProcessingStart(taskGraphContent, TASKS_PATH, "task-graph-".concat(Date.now()));
                     console.log("\uD83D\uDD04 Starting processing with content hash: ".concat(contentHash.substring(0, 8), "..."));
-                    idToIssue_1 = {};
+                    idToIssue = {};
                     createdIssues = [];
                     _loop_1 = function (task) {
-                        var baseIssue, parentIssue, _l, taskDependencies, _loop_3, _m, _o, sub;
-                        var _p;
-                        return __generator(this, function (_q) {
-                            switch (_q.label) {
+                        var baseIssue, parentIssue, _j, taskDependencies, _loop_2, _k, _l, sub;
+                        var _m;
+                        return __generator(this, function (_o) {
+                            switch (_o.label) {
                                 case 0:
                                     task.requiredBy = tasks.filter(function (t) { var _a; return (_a = t.dependencies) === null || _a === void 0 ? void 0 : _a.find(function (d) { return d === task.id; }); });
                                     return [4 /*yield*/, createOrGetIssue(task)];
                                 case 1:
-                                    baseIssue = _q.sent();
-                                    _l = [__assign({}, baseIssue)];
-                                    _p = {};
+                                    baseIssue = _o.sent();
+                                    _j = [__assign({}, baseIssue)];
+                                    _m = {};
                                     return [4 /*yield*/, getSubIssues(baseIssue)];
                                 case 2:
-                                    parentIssue = __assign.apply(void 0, _l.concat([(_p.subIssues = _q.sent(), _p)]));
-                                    idToIssue_1["".concat(task.id)] = parentIssue;
-                                    taskDependencies = ((_c = task.dependencies) === null || _c === void 0 ? void 0 : _c.map(String)) || [];
+                                    parentIssue = __assign.apply(void 0, _j.concat([(_m.subIssues = _o.sent(), _m)]));
+                                    idToIssue["".concat(task.id)] = parentIssue;
+                                    taskDependencies = ((_e = task.dependencies) === null || _e === void 0 ? void 0 : _e.map(String)) || [];
                                     idempotencyManager.recordIssueCreation(parentIssue.number, String(task.id), contentHash, parentIssue.expectedBody, generateIssueLabels(task, undefined, complexityMap[String(task.id)]), taskDependencies);
                                     createdIssues.push(parentIssue.number);
                                     if (!task.subtasks) return [3 /*break*/, 6];
-                                    _loop_3 = function (sub) {
+                                    _loop_2 = function (sub) {
                                         var subIssue, subId, subDependencies;
-                                        return __generator(this, function (_r) {
-                                            switch (_r.label) {
+                                        return __generator(this, function (_p) {
+                                            switch (_p.label) {
                                                 case 0:
-                                                    sub.requiredBy = (_d = task.subtasks) === null || _d === void 0 ? void 0 : _d.filter(function (t) { var _a; return (_a = t.dependencies) === null || _a === void 0 ? void 0 : _a.find(function (d) { return d === sub.id; }); });
+                                                    sub.requiredBy = (_f = task.subtasks) === null || _f === void 0 ? void 0 : _f.filter(function (t) { var _a; return (_a = t.dependencies) === null || _a === void 0 ? void 0 : _a.find(function (d) { return d === sub.id; }); });
                                                     return [4 /*yield*/, createOrGetIssue(sub, task, parentIssue)];
                                                 case 1:
-                                                    subIssue = _r.sent();
+                                                    subIssue = _p.sent();
                                                     // Link subtask to parent task
                                                     return [4 /*yield*/, addSubIssue(parentIssue, subIssue)];
                                                 case 2:
                                                     // Link subtask to parent task
-                                                    _r.sent();
+                                                    _p.sent();
                                                     subId = "".concat(task.id, ".").concat(sub.id);
-                                                    idToIssue_1[subId] = subIssue;
-                                                    subDependencies = ((_e = sub.dependencies) === null || _e === void 0 ? void 0 : _e.map(function (depId) { return "".concat(task.id, ".").concat(depId); })) || [];
+                                                    idToIssue[subId] = subIssue;
+                                                    subDependencies = ((_g = sub.dependencies) === null || _g === void 0 ? void 0 : _g.map(function (depId) { return "".concat(task.id, ".").concat(depId); })) || [];
                                                     idempotencyManager.recordIssueCreation(subIssue.number, subId, contentHash, subIssue.expectedBody, generateIssueLabels(sub, task, complexityMap[subId]), subDependencies, String(task.id));
                                                     createdIssues.push(subIssue.number);
                                                     return [2 /*return*/];
                                             }
                                         });
                                     };
-                                    _m = 0, _o = task.subtasks;
-                                    _q.label = 3;
+                                    _k = 0, _l = task.subtasks;
+                                    _o.label = 3;
                                 case 3:
-                                    if (!(_m < _o.length)) return [3 /*break*/, 6];
-                                    sub = _o[_m];
-                                    return [5 /*yield**/, _loop_3(sub)];
+                                    if (!(_k < _l.length)) return [3 /*break*/, 6];
+                                    sub = _l[_k];
+                                    return [5 /*yield**/, _loop_2(sub)];
                                 case 4:
-                                    _q.sent();
-                                    _q.label = 5;
+                                    _o.sent();
+                                    _o.label = 5;
                                 case 5:
-                                    _m++;
+                                    _k++;
                                     return [3 /*break*/, 3];
                                 case 6: return [2 /*return*/];
                             }
                         });
                     };
                     _i = 0, tasks_1 = tasks;
-                    _k.label = 2;
+                    _h.label = 2;
                 case 2:
                     if (!(_i < tasks_1.length)) return [3 /*break*/, 5];
                     task = tasks_1[_i];
                     return [5 /*yield**/, _loop_1(task)];
                 case 3:
-                    _k.sent();
-                    _k.label = 4;
+                    _h.sent();
+                    _h.label = 4;
                 case 4:
                     _i++;
                     return [3 /*break*/, 2];
                 case 5:
-                    _loop_2 = function (task) {
-                        var issue, depIssues, reqByIssues, taskId, complexity, baseLabels, dependencyLabels, updatedLabels, needsUpdate, _s, _t, sub, issue_1, depIssues_1, reqByIssues_1, subTaskId, subComplexity, subBaseLabels, subDependencyLabels, subUpdatedLabels, subNeedsUpdate;
-                        return __generator(this, function (_u) {
-                            switch (_u.label) {
-                                case 0:
-                                    issue = idToIssue_1["".concat(task.id)];
-                                    depIssues = (_f = task.dependencies) === null || _f === void 0 ? void 0 : _f.map(function (depId) { return idToIssue_1["".concat(depId)]; }).filter(Boolean);
-                                    issue.expectedBody = updateIssueWithDependencies(issue.expectedBody, depIssues);
-                                    reqByIssues = (_g = task.requiredBy) === null || _g === void 0 ? void 0 : _g.map(function (reqBy) { return idToIssue_1["".concat(reqBy.id)]; }).filter(Boolean);
-                                    issue.expectedBody = updateBodyWithRequiredBy(issue.expectedBody, reqByIssues);
-                                    taskId = String(task.id);
-                                    complexity = complexityMap[taskId];
-                                    baseLabels = generateIssueLabels(task, undefined, complexity);
-                                    dependencyLabels = updateDependencyLabels(task, depIssues);
-                                    updatedLabels = __spreadArray(__spreadArray([], baseLabels, true), dependencyLabels, true);
-                                    needsUpdate = issue.expectedBody !== issue.body;
-                                    if (!needsUpdate) return [3 /*break*/, 2];
-                                    return [4 /*yield*/, githubApi.updateIssue(issue.number, {
-                                            body: issue.expectedBody,
-                                            labels: updatedLabels,
-                                        })];
-                                case 1:
-                                    _u.sent();
-                                    console.log("Updated issue #".concat(issue.number, " with dependencies/required-bys and labels."));
-                                    // Record the update in idempotency state
-                                    idempotencyManager.recordIssueUpdate(issue.number, issue.expectedBody, updatedLabels);
-                                    _u.label = 2;
-                                case 2:
-                                    if (!task.subtasks) return [3 /*break*/, 6];
-                                    _s = 0, _t = task.subtasks;
-                                    _u.label = 3;
-                                case 3:
-                                    if (!(_s < _t.length)) return [3 /*break*/, 6];
-                                    sub = _t[_s];
-                                    issue_1 = idToIssue_1["".concat(task.id, ".").concat(sub.id)];
-                                    depIssues_1 = (_h = sub.dependencies) === null || _h === void 0 ? void 0 : _h.map(function (depId) { return idToIssue_1["".concat(task.id, ".").concat(depId)]; }).filter(Boolean);
-                                    issue_1.expectedBody = updateIssueWithDependencies(issue_1.expectedBody, depIssues_1);
-                                    reqByIssues_1 = (_j = sub.requiredBy) === null || _j === void 0 ? void 0 : _j.map(function (reqBy) { return idToIssue_1["".concat(task.id, ".").concat(reqBy.id)]; }).filter(Boolean);
-                                    issue_1.expectedBody = updateBodyWithRequiredBy(issue_1.expectedBody, reqByIssues_1);
-                                    subTaskId = "".concat(task.id, ".").concat(sub.id);
-                                    subComplexity = complexityMap[subTaskId];
-                                    subBaseLabels = generateIssueLabels(sub, task, subComplexity);
-                                    subDependencyLabels = updateDependencyLabels(sub, depIssues_1);
-                                    subUpdatedLabels = __spreadArray(__spreadArray([], subBaseLabels, true), subDependencyLabels, true);
-                                    subNeedsUpdate = issue_1.expectedBody !== issue_1.body;
-                                    if (!subNeedsUpdate) return [3 /*break*/, 5];
-                                    return [4 /*yield*/, githubApi.updateIssue(issue_1.number, {
-                                            body: issue_1.expectedBody,
-                                            labels: subUpdatedLabels,
-                                        })];
-                                case 4:
-                                    _u.sent();
-                                    console.log("Updated issue #".concat(issue_1.number, " with dependencies/required-bys and labels."));
-                                    // Record the update in idempotency state
-                                    idempotencyManager.recordIssueUpdate(issue_1.number, issue_1.expectedBody, subUpdatedLabels);
-                                    _u.label = 5;
-                                case 5:
-                                    _s++;
-                                    return [3 /*break*/, 3];
-                                case 6: return [2 /*return*/];
-                            }
-                        });
-                    };
                     _a = 0, tasks_2 = tasks;
-                    _k.label = 6;
+                    _h.label = 6;
                 case 6:
-                    if (!(_a < tasks_2.length)) return [3 /*break*/, 9];
+                    if (!(_a < tasks_2.length)) return [3 /*break*/, 12];
                     task = tasks_2[_a];
-                    return [5 /*yield**/, _loop_2(task)];
+                    issue = idToIssue["".concat(task.id)];
+                    return [4 /*yield*/, updateIssueWithDependenciesAndLabels(issue, task, undefined, idToIssue, idempotencyManager)];
                 case 7:
-                    _k.sent();
-                    _k.label = 8;
+                    _h.sent();
+                    if (!task.subtasks) return [3 /*break*/, 11];
+                    _b = 0, _c = task.subtasks;
+                    _h.label = 8;
                 case 8:
+                    if (!(_b < _c.length)) return [3 /*break*/, 11];
+                    sub = _c[_b];
+                    issue_1 = idToIssue["".concat(task.id, ".").concat(sub.id)];
+                    return [4 /*yield*/, updateIssueWithDependenciesAndLabels(issue_1, sub, task, idToIssue, idempotencyManager)];
+                case 9:
+                    _h.sent();
+                    _h.label = 10;
+                case 10:
+                    _b++;
+                    return [3 /*break*/, 8];
+                case 11:
                     _a++;
                     return [3 /*break*/, 6];
-                case 9:
+                case 12:
                     console.log('All issues created and linked.');
                     // Wait for all pending API requests to complete
                     return [4 /*yield*/, githubApi.waitForCompletion()];
-                case 10:
+                case 13:
                     // Wait for all pending API requests to complete
-                    _k.sent();
+                    _h.sent();
                     // Record successful completion
                     idempotencyManager.recordPrdProcessingComplete(contentHash, createdIssues);
                     // Commit transaction
@@ -530,25 +526,25 @@ function main() {
                     console.log("\u2705 Successfully processed ".concat(createdIssues.length, " issues with idempotency tracking"));
                     summary = idempotencyManager.getStateSummary();
                     console.log("\uD83D\uDCCA Final state: ".concat(summary.totalPrds, " PRDs, ").concat(summary.totalIssues, " issues, ").concat(summary.processedPrds, " completed"));
-                    return [3 /*break*/, 13];
-                case 11:
-                    error_3 = _k.sent();
+                    return [3 /*break*/, 16];
+                case 14:
+                    error_3 = _h.sent();
                     console.error('❌ Error during processing:', error_3);
                     // Record failure and rollback transaction
                     if (contentHash) {
-                        idempotencyManager.recordPrdProcessingFailure(contentHash, error_3 instanceof Error ? error_3.message : String(error_3));
+                        idempotencyManager.recordPrdProcessingFailure(contentHash, (0, platform_utils_1.formatError)(error_3));
                     }
                     // Rollback all operations
                     idempotencyManager.rollbackTransaction();
                     // Re-throw error for upstream handling
                     throw error_3;
-                case 12:
+                case 15:
                     // Clean up resources
                     githubApi.destroy();
                     // Clean up old transactions
                     idempotencyManager.cleanupOldTransactions();
                     return [7 /*endfinally*/];
-                case 13: return [2 /*return*/];
+                case 16: return [2 /*return*/];
             }
         });
     });

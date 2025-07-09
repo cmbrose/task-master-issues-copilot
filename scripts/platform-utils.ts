@@ -76,3 +76,11 @@ export function getBinaryDownloadUrl(
   const binaryName = getBinaryName(platform, baseName);
   return `${baseUrl}/v${version}/${binaryName}`;
 }
+
+/**
+ * Format error message consistently across the codebase
+ * Handles both Error objects and unknown error types
+ */
+export function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
