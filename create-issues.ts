@@ -16,6 +16,7 @@ import * as dotenv from 'dotenv';
 import { components } from "@octokit/openapi-types";
 import { EnhancedGitHubApi, createGitHubApiClient } from './scripts/github-api';
 import { IdempotencyManager } from './scripts/idempotency-manager';
+import { formatError } from './scripts/platform-utils';
 
 // Types for Node.js globals (process, etc.)
 // If you see type errors, run: npm install --save-dev @types/node
@@ -280,7 +281,7 @@ async function addSubIssue(parentIssue: ParentIssue, subIssue: Issue) {
     parentIssue.subIssues.push(subIssue);
     console.log(`Added sub-issue #${subIssue.number} to parent #${parentIssue.number}.`);
   } catch (error) {
-    console.warn(`Failed to add sub-issue relationship: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(`Failed to add sub-issue relationship: ${formatError(error)}`);
     // Continue without sub-issue relationship
   }
 }
@@ -316,7 +317,7 @@ async function getSubIssues(issue: Issue): Promise<ApiIssue[]> {
   try {
     return await githubApi.getSubIssues(issue.number);
   } catch (error) {
-    console.warn(`Failed to fetch sub-issues for #${issue.number}: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(`Failed to fetch sub-issues for #${issue.number}: ${formatError(error)}`);
     return [];
   }
 }
@@ -503,7 +504,7 @@ async function main() {
     if (contentHash) {
       idempotencyManager.recordPrdProcessingFailure(
         contentHash, 
-        error instanceof Error ? error.message : String(error)
+        formatError(error)
       );
     }
     

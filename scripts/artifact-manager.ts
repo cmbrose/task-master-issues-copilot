@@ -16,6 +16,7 @@ import * as https from 'https';
 import * as http from 'http';
 import { DefaultArtifactClient } from '@actions/artifact';
 import type { ProcessingCheckpoint } from './github-api';
+import { formatError } from './platform-utils';
 
 /**
  * Task graph metadata for artifact storage
@@ -274,7 +275,7 @@ export class ArtifactManager {
 
       return artifactId;
     } catch (error) {
-      console.error(`❌ Failed to upload task graph artifact: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`❌ Failed to upload task graph artifact: ${formatError(error)}`);
       throw error;
     } finally {
       // Clean up temp file
@@ -315,7 +316,7 @@ export class ArtifactManager {
 
       console.log(`✅ Checkpoint saved: ${checkpoint.processedItems}/${checkpoint.totalItems} items processed`);
     } catch (error) {
-      console.warn(`⚠️ Failed to save checkpoint: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`⚠️ Failed to save checkpoint: ${formatError(error)}`);
       // Don't throw - checkpoint failure shouldn't stop main processing
     } finally {
       // Clean up temp file
@@ -368,7 +369,7 @@ export class ArtifactManager {
 
       return replayId;
     } catch (error) {
-      console.error(`❌ Failed to create replay data: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`❌ Failed to create replay data: ${formatError(error)}`);
       throw error;
     } finally {
       // Clean up temp file
@@ -427,7 +428,7 @@ export class ArtifactManager {
       console.log(`   - Processing time: ${report.summary.processingTimeSeconds}s`);
       console.log(`   - Average speed: ${report.summary.averageItemsPerSecond} items/sec`);
     } catch (error) {
-      console.warn(`⚠️ Failed to upload performance report: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`⚠️ Failed to upload performance report: ${formatError(error)}`);
     } finally {
       // Clean up temp file
       if (fs.existsSync(reportPath)) {
@@ -545,7 +546,7 @@ export class ArtifactManager {
         }
       }
     } catch (error) {
-      console.warn(`Warning: Failed to cleanup temp files: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`Warning: Failed to cleanup temp files: ${formatError(error)}`);
     }
   }
 
@@ -595,7 +596,7 @@ export class ArtifactManager {
 
       return artifact;
     } catch (error) {
-      console.error(`❌ Failed to download artifact ${artifactId}: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`❌ Failed to download artifact ${artifactId}: ${formatError(error)}`);
       return null;
     }
   }
@@ -627,7 +628,7 @@ export class ArtifactManager {
       
       return [];
     } catch (error) {
-      console.error(`❌ Failed to search artifacts: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`❌ Failed to search artifacts: ${formatError(error)}`);
       return [];
     }
   }
@@ -689,7 +690,7 @@ export class ArtifactManager {
       console.log(`✅ Artifact structure validation passed`);
       return true;
     } catch (error) {
-      console.error(`❌ Artifact validation error: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`❌ Artifact validation error: ${formatError(error)}`);
       return false;
     }
   }
@@ -846,7 +847,7 @@ export class ArtifactManager {
       try {
         expectedChecksum = await this.retrieveRemoteChecksum(checksumOptions.url);
       } catch (error) {
-        console.error(`❌ Failed to retrieve checksum from URL: ${error instanceof Error ? error.message : String(error)}`);
+        console.error(`❌ Failed to retrieve checksum from URL: ${formatError(error)}`);
         return false;
       }
     } else {
@@ -867,7 +868,7 @@ export class ArtifactManager {
       console.log(`✅ Checksum verification passed for ${filePath} (${algorithm})`);
       return true;
     } catch (error) {
-      console.error(`❌ Error calculating checksum: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`❌ Error calculating checksum: ${formatError(error)}`);
       return false;
     }
   }
@@ -952,7 +953,7 @@ export class ArtifactManager {
       
       return true; // Placeholder - always returns true for now
     } catch (error) {
-      console.error(`❌ Error verifying signature: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`❌ Error verifying signature: ${formatError(error)}`);
       return false;
     }
   }
@@ -1087,7 +1088,7 @@ export class ArtifactManager {
         return result;
 
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = formatError(error);
         console.error(`❌ Download attempt ${attempt + 1} failed: ${errorMessage}`);
         
         result.downloadInfo.retryAttempts = attempt;
